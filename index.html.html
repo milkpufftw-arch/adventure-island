@@ -1,0 +1,3172 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>自立冒險島｜3D 微縮沙盤生活模擬遊戲</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Three.js r128 & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Nunito:wght@700;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Nunito', 'Noto Sans TC', sans-serif;
+      background: #d8eff2;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      z-index: 1;
+    }
+    /* 毛玻璃面板 */
+    .glass-card {
+      background: rgba(255, 253, 249, 0.82);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.78);
+      box-shadow: 0 10px 30px rgba(30, 58, 72, 0.12);
+    }
+    /* 3D 浮動島嶼標籤 */
+    .island-label {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: auto;
+      cursor: pointer;
+      transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+      z-index: 10;
+    }
+    .island-label.hovered {
+      transform: translate(-50%, -62%) scale(1.1);
+      z-index: 15;
+    }
+    .island-label.hovered .label-pill {
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 8px 20px rgba(245, 158, 11, 0.28);
+      border-color: rgba(251, 191, 36, 0.85);
+    }
+    /* 黏土質感按鈕 */
+    .clay-btn {
+      box-shadow: 0 4px 0 rgba(0, 0, 0, 0.12), inset 0 2px 4px rgba(255, 255, 255, 0.45);
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.15s ease;
+    }
+    .clay-btn:active {
+      transform: translateY(2px);
+      box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12), inset 0 2px 4px rgba(255, 255, 255, 0.35);
+    }
+    /* 呼吸動畫圓圈 */
+    @keyframes breathePulse {
+      0% { transform: scale(0.75); opacity: 0.72; }
+      40% { transform: scale(1.24); opacity: 1; }
+      60% { transform: scale(1.24); opacity: 1; }
+      100% { transform: scale(0.75); opacity: 0.72; }
+    }
+    .breathe-active {
+      animation: breathePulse 5s ease-in-out infinite;
+    }
+    @keyframes floatBadge {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-4px); }
+    }
+    .float-badge {
+      animation: floatBadge 2.2s ease-in-out infinite;
+    }
+    /* 柔和滑動條 */
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.4);
+      border-radius: 999px;
+    }
+  </style>
+</head>
+<body class="text-slate-700">
+
+  <!-- 3D 畫布容器 -->
+  <div id="canvas-container"></div>
+
+  <!-- 3D 投影島嶼標籤層 -->
+  <div id="labels-layer" class="fixed inset-0 pointer-events-none z-10 overflow-hidden"></div>
+
+  <!-- 清爽毛玻璃頂部 UI 覆層 -->
+  <header id="hud" class="fixed top-0 left-0 right-0 z-20 p-3 sm:p-4 pointer-events-none hidden">
+    <div class="max-w-7xl mx-auto flex flex-col gap-2">
+      <div class="flex flex-wrap items-start justify-between gap-2.5">
+        <!-- 左上角：極簡標題與 Combo -->
+        <div class="pointer-events-auto glass-card px-4 py-2.5 rounded-2xl flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-orange-400 flex items-center justify-center text-lg shadow-inner">🏝️</div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-sm sm:text-base font-black text-slate-800 tracking-wide">自立冒險島</h1>
+              <span id="stat-age-pill" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-sky-100/90 text-sky-700">17歲</span>
+              <span id="stat-combo-pill" class="hidden text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-600">🔥 連對 x2</span>
+            </div>
+            <div class="text-[11px] text-slate-500 font-medium">隨機題庫探索 × 生活模擬沙盤</div>
+          </div>
+        </div>
+
+        <!-- 右上角：生存狀態與快捷按鈕 -->
+        <div class="pointer-events-auto flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div class="glass-card px-2.5 py-1.5 rounded-2xl flex items-center gap-1.5 sm:gap-2">
+            <div class="flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50/90 px-2 py-1 rounded-xl" title="存款">
+              <span>💰</span><span id="stat-money">$0</span>
+            </div>
+            <div class="flex items-center gap-1 text-xs font-bold text-rose-600 bg-rose-50/90 px-2 py-1 rounded-xl" title="體力">
+              <span>❤️</span><span id="stat-health">90</span>
+            </div>
+            <div class="flex items-center gap-1 text-xs font-bold text-sky-600 bg-sky-50/90 px-2 py-1 rounded-xl" title="心情">
+              <span>🌤️</span><span id="stat-mood">75</span>
+            </div>
+            <div class="flex items-center gap-1 text-xs font-bold text-violet-600 bg-violet-50/90 px-2 py-1 rounded-xl" title="資安防禦">
+              <span>🛡️</span><span id="stat-security">50</span>
+            </div>
+          </div>
+
+          <button id="btn-progress" onclick="openProgressOrEnding()" class="clay-btn bg-emerald-500 hover:bg-emerald-600 text-white text-xs sm:text-sm font-bold px-3 py-2 rounded-2xl flex items-center gap-1">
+            <span>✦</span><span id="stat-lit">0/6</span>
+          </button>
+          <button onclick="openBagModal()" class="clay-btn glass-card hover:bg-white text-slate-700 text-xs sm:text-sm font-bold px-3 py-2 rounded-2xl" title="我的道具與成就徽章">
+            🎒 <span id="bag-count" class="text-emerald-600">0</span>
+          </button>
+          <button id="btn-sound" onclick="toggleSound()" class="clay-btn glass-card hover:bg-white text-slate-700 text-xs sm:text-sm font-bold px-2.5 py-2 rounded-2xl" title="切換療癒音效">
+            🔊
+          </button>
+          <button onclick="openHelpModal()" class="clay-btn glass-card hover:bg-white text-slate-700 text-xs sm:text-sm font-bold px-2.5 py-2 rounded-2xl" title="玩法說明">
+            ❓
+          </button>
+        </div>
+      </div>
+
+      <!-- 心情起霧溫柔提示條 -->
+      <div id="mood-warning" class="hidden pointer-events-auto self-center glass-card border-amber-200 text-amber-800 text-xs sm:text-sm font-medium px-4 py-1.5 rounded-full flex items-center gap-2">
+        <span>🌫️ 島上天空有點起霧了，累了就去「心・能量花園」喘口氣吧！</span>
+        <button onclick="selectIslandById('wellness')" class="underline font-bold text-amber-900">馬上前往</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 右下角：隨機事件探索、回到全島視角與操作提示 -->
+  <div id="bottom-controls" class="fixed bottom-4 right-4 z-20 hidden flex-col items-end gap-2 pointer-events-none">
+    <button onclick="triggerRandomEvent(true)" class="pointer-events-auto float-badge clay-btn bg-amber-400 hover:bg-amber-500 text-slate-900 font-black text-xs sm:text-sm px-4 py-2.5 rounded-2xl flex items-center gap-1.5">
+      <span>⚡</span><span>抽一個突發試煉</span>
+    </button>
+    <button onclick="resetCameraOverview()" class="pointer-events-auto clay-btn glass-card hover:bg-white text-slate-700 font-bold text-xs sm:text-sm px-4 py-2.5 rounded-2xl flex items-center gap-2">
+      <span>🔭</span><span>回到全島視角</span>
+    </button>
+    <div class="glass-card px-3.5 py-1.5 rounded-full text-[11px] font-medium text-slate-500 hidden sm:flex items-center gap-2">
+      <span>🖱️ 拖曳旋轉</span>
+      <span class="opacity-40">·</span>
+      <span>🔍 滾輪縮放</span>
+      <span class="opacity-40">·</span>
+      <span>👆 點擊小島抽題探索</span>
+    </div>
+  </div>
+
+  <!-- 柔和提示 Toast -->
+  <div id="toast-container" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 pointer-events-none w-[90%] max-w-sm"></div>
+
+  <!-- 島嶼任務卡片（毛玻璃側邊／底部抽屜） -->
+  <aside id="island-panel" class="fixed bottom-0 left-0 right-0 sm:bottom-5 sm:left-5 sm:right-auto sm:w-[420px] max-h-[76vh] glass-card rounded-t-3xl sm:rounded-3xl z-30 transform translate-y-[115%] transition-transform duration-300 ease-out flex flex-col overflow-hidden">
+    <div class="w-12 h-1.5 bg-slate-300/80 rounded-full mx-auto mt-2.5 sm:hidden"></div>
+    <div class="px-5 pt-3.5 pb-3 border-b border-slate-200/60 flex items-start justify-between gap-3">
+      <div>
+        <div class="flex items-center gap-2">
+          <span id="panel-badge" class="text-xs font-black text-white px-2.5 py-0.5 rounded-full bg-amber-400">啟</span>
+          <h2 id="panel-title" class="text-lg sm:text-xl font-black text-slate-800">領航廣場</h2>
+          <span id="panel-status" class="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">探索中</span>
+        </div>
+        <p id="panel-summary" class="text-xs sm:text-sm text-slate-500 mt-1 leading-relaxed"></p>
+      </div>
+      <button onclick="closeIslandPanel()" class="w-8 h-8 rounded-full bg-slate-100/90 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold shrink-0">✕</button>
+    </div>
+    <div id="panel-body" class="p-5 overflow-y-auto custom-scroll flex-1 space-y-3"></div>
+  </aside>
+
+  <!-- 開局引導彈窗 (Onboarding) -->
+  <div id="onboarding-modal" class="fixed inset-0 z-50 bg-slate-900/35 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white/95 backdrop-blur-md rounded-3xl max-w-md w-full p-6 shadow-2xl border-4 border-amber-100 max-h-[90vh] overflow-y-auto custom-scroll">
+      <div id="ob-step-1" class="text-center space-y-4">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-100 to-orange-100 text-4xl shadow-inner">🏝️</div>
+        <div>
+          <h1 class="text-2xl font-black text-slate-800">歡迎登陸《自立冒險島》</h1>
+          <p class="text-sm text-slate-500 mt-1.5 leading-relaxed">
+            在這座溫暖的微縮沙盤群島裡，你可以零風險練習租屋、求職、理財、防詐與求助資源。每次挑戰都會<b>隨機抽題</b>，連續答對還有額外獎勵喔！
+          </p>
+        </div>
+
+        <div id="draw-box" class="bg-gradient-to-br from-sky-50 to-amber-50 rounded-2xl p-4 border border-amber-100">
+          <p class="text-xs font-bold text-slate-500 mb-2">第一步：起跑點抽籤（隨機決定年齡與初始存款）</p>
+          <div class="grid grid-cols-2 gap-3 my-2">
+            <div class="bg-white rounded-xl p-3 shadow-sm">
+              <div class="text-xs text-slate-400">抽中年齡</div>
+              <div id="draw-age" class="text-2xl font-black text-sky-600 mt-0.5">?? 歲</div>
+            </div>
+            <div class="bg-white rounded-xl p-3 shadow-sm">
+              <div class="text-xs text-slate-400">初始存款</div>
+              <div id="draw-money" class="text-2xl font-black text-amber-600 mt-0.5">$ ????</div>
+            </div>
+          </div>
+          <p id="draw-note" class="text-xs text-slate-500 mt-2 hidden"></p>
+        </div>
+
+        <button id="btn-spin" onclick="spinOriginWheel()" class="clay-btn w-full py-3.5 rounded-2xl bg-amber-400 hover:bg-amber-500 text-white font-black text-base">
+          🎲 轉動命運轉盤
+        </button>
+        <button id="btn-to-step2" onclick="goToOnboardingStep2()" class="hidden clay-btn w-full py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-base">
+          下一步：設定虛擬手機密碼 →
+        </button>
+        <button onclick="quickExploreMode()" class="text-xs text-slate-400 hover:text-slate-600 underline pt-1">
+          先用預設身分直接登島逛逛
+        </button>
+      </div>
+
+      <div id="ob-step-2" class="hidden space-y-4">
+        <div class="text-center">
+          <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-violet-100 text-3xl">📱</div>
+          <h2 class="text-xl font-black text-slate-800 mt-2">開局任務：設定手機資安鎖</h2>
+          <p class="text-xs sm:text-sm text-slate-500 mt-1">
+            手機是你找工作、租屋與收款的必備工具。你會怎麼設定密碼？
+          </p>
+        </div>
+        <div class="space-y-2.5">
+          <button onclick="finishOnboarding('weak')" class="w-full text-left p-3.5 rounded-2xl border-2 border-slate-100 hover:border-amber-300 bg-slate-50 hover:bg-amber-50/50 transition">
+            <div class="font-bold text-slate-800 text-sm">A. 用 123456 或自己的生日</div>
+            <div class="text-xs text-slate-500 mt-0.5">好記最重要，不怕忘記密碼。</div>
+          </button>
+          <button onclick="finishOnboarding('strong')" class="w-full text-left p-3.5 rounded-2xl border-2 border-slate-100 hover:border-emerald-400 bg-slate-50 hover:bg-emerald-50/50 transition">
+            <div class="font-bold text-slate-800 text-sm">B. 英文＋數字＋符號，並開啟雙重驗證 (2FA)</div>
+            <div class="text-xs text-slate-500 mt-0.5">雖然多一步驟，但能大幅降低帳號被盜風險。</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 隨機危機事件彈窗 -->
+  <div id="event-modal" class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border-4 border-sky-100 max-h-[88vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between mb-2">
+        <span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-black">⚡ 生活突發試煉</span>
+        <span id="event-counter" class="text-[11px] font-bold text-slate-400"></span>
+      </div>
+      <h3 id="event-title" class="text-xl font-black text-slate-800"></h3>
+      <p id="event-desc" class="text-sm text-slate-600 mt-2 leading-relaxed bg-slate-50 p-3.5 rounded-2xl"></p>
+      <div id="event-hint" class="hidden mt-3 p-3 rounded-2xl bg-violet-50 border border-violet-200 text-xs font-bold text-violet-700"></div>
+      <div id="event-choices" class="mt-4 space-y-2.5"></div>
+      <div id="event-result" class="hidden mt-4 space-y-3">
+        <div id="event-feedback" class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-sm text-slate-700 leading-relaxed"></div>
+        <button onclick="closeEventModal()" class="clay-btn w-full py-3 rounded-2xl bg-sky-500 hover:bg-sky-600 text-white font-bold">我知道了，繼續探索</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 背包與成就徽章彈窗 -->
+  <div id="bag-modal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 max-h-[88vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-black text-slate-800">🎒 我的自立背包與成就</h3>
+        <button onclick="closeModal('bag-modal')" class="w-8 h-8 rounded-full bg-slate-100 font-bold text-slate-500">✕</button>
+      </div>
+      <div class="bg-sky-50 rounded-2xl p-3.5 text-sm grid grid-cols-3 gap-2 text-center">
+        <div>
+          <div class="text-[11px] text-slate-500">目前年齡</div>
+          <div id="bag-age" class="font-black text-sky-700 text-base"></div>
+        </div>
+        <div>
+          <div class="text-[11px] text-slate-500">點亮島嶼</div>
+          <div id="bag-lit" class="font-black text-emerald-600 text-base"></div>
+        </div>
+        <div>
+          <div class="text-[11px] text-slate-500">最高連對</div>
+          <div id="bag-combo" class="font-black text-orange-500 text-base"></div>
+        </div>
+      </div>
+      <div>
+        <div class="text-xs font-bold text-slate-500 mb-2">🛡️ 已獲得的保護道具 / 證明</div>
+        <div id="bag-items" class="space-y-2"></div>
+      </div>
+      <div>
+        <div class="text-xs font-bold text-slate-500 mb-2">🏅 解鎖的自立成就徽章</div>
+        <div id="bag-badges" class="flex flex-wrap gap-1.5"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 操作說明彈窗 -->
+  <div id="help-modal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-black text-slate-800">🧭 怎麼玩《自立冒險島》？</h3>
+        <button onclick="closeModal('help-modal')" class="w-8 h-8 rounded-full bg-slate-100 font-bold text-slate-500">✕</button>
+      </div>
+      <ol class="text-sm text-slate-600 space-y-2 list-decimal pl-5 leading-relaxed">
+        <li><b>隨機題庫挑戰：</b>每座島都有豐富題庫，每次點擊挑戰都會<b>隨機抽題與洗牌選項</b>！完成後還可重複抽新題練習。</li>
+        <li><b>連對 Combo 獎勵：</b>連續答對 2 題以上會觸發 🔥 Combo，額外獲得獎金與心情值！</li>
+        <li><b>互動打工與小舖：</b>去「職・夢想工坊」可快速打工賺錢；去「財・金幣市集」可買便當補血、存備用金或買保險；沒錢時去「啟・領航廣場」申請急難救助金。</li>
+        <li><b>主動抽突發試煉：</b>隨時可點右下角「⚡ 抽一個突發試煉」，演練防詐與生活危機應變。</li>
+      </ol>
+      <button onclick="closeModal('help-modal')" class="clay-btn w-full py-3 rounded-2xl bg-emerald-500 text-white font-bold">繼續冒險！</button>
+    </div>
+  </div>
+
+  <!-- 結局結算與 CCSA 雷達圖彈窗 -->
+  <div id="ending-modal" class="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm hidden items-center justify-center p-3 sm:p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border-4 border-emerald-100 max-h-[92vh] overflow-y-auto custom-scroll space-y-4">
+      <div class="text-center">
+        <div class="mx-auto w-24 h-20 flex items-center justify-center">
+          <svg viewBox="0 0 120 90" class="w-full h-full drop-shadow-md">
+            <rect x="8" y="10" width="104" height="72" rx="14" fill="#E07A5F" stroke="#B85D45" stroke-width="3"/>
+            <rect x="14" y="16" width="92" height="60" rx="10" fill="#FFFDF9"/>
+            <rect x="18" y="20" width="42" height="52" rx="6" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5"/>
+            <circle cx="39" cy="46" r="6" fill="#E63946"/>
+            <rect x="64" y="20" width="38" height="28" rx="6" fill="#FEF3C7"/>
+            <ellipse cx="83" cy="34" rx="13" ry="8" fill="#D97706"/>
+            <rect x="64" y="52" width="18" height="20" rx="4" fill="#DCFCE7"/>
+            <circle cx="73" cy="62" r="6" fill="#22C55E"/>
+            <rect x="85" y="52" width="17" height="20" rx="4" fill="#FEF08A"/>
+            <rect x="88" y="56" width="11" height="12" rx="2" fill="#FACC15"/>
+          </svg>
+        </div>
+        <span class="inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-black mt-1">🎉 恭喜獲得自立成功便當！</span>
+        <h2 id="ending-title" class="text-2xl font-black text-slate-800 mt-1">自立生活達人</h2>
+        <p id="ending-comment" class="text-xs sm:text-sm text-slate-500 mt-1 leading-relaxed"></p>
+        <div id="ending-badges" class="flex flex-wrap justify-center gap-1.5 mt-2.5"></div>
+      </div>
+
+      <div class="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+        <div class="text-center text-xs font-bold text-slate-600 mb-2">📊 CCSA 九大自立生活能力雷達圖</div>
+        <div class="flex justify-center">
+          <canvas id="radar-canvas" width="320" height="290" class="max-w-full h-auto"></canvas>
+        </div>
+      </div>
+
+      <details class="bg-amber-50/80 rounded-2xl p-3.5 border border-amber-100 text-xs sm:text-sm">
+        <summary class="font-bold text-amber-800 cursor-pointer">💬 給社工與少年的反思討論題（點此展開）</summary>
+        <ul class="mt-2 space-y-1.5 text-slate-600 list-disc pl-4 leading-relaxed">
+          <li>開局抽到初始存款與年齡時，你的第一個感覺是什麼？</li>
+          <li>在島上遇到困難時，你有想到去「啟・領航廣場」找社工或急難救助金嗎？</li>
+          <li>面對「先買後付」或「高薪車手私訊」時，你是怎麼做出決定的？</li>
+          <li>這張雷達圖裡，哪一項是你覺得自己表現最棒的？哪一項想在現實中多練習？</li>
+        </ul>
+      </details>
+
+      <div class="grid grid-cols-2 gap-2.5 pt-1">
+        <button onclick="closeModal('ending-modal')" class="clay-btn py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm">繼續逛島抽題</button>
+        <button onclick="restartGame()" class="clay-btn py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm">重新開局</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ============================================================================
+// 0. 輕柔療癒 Web Audio 音效合成器 (零外部依賴，符合創傷知情設計)
+// ============================================================================
+let audioCtx = null;
+function ensureAudio() {
+  if (!state.soundEnabled) return null;
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) audioCtx = new AC();
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+function playTone(type) {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  if (type === 'click') {
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(520, now);
+    osc.frequency.exponentialRampToValueAtTime(660, now + 0.08);
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+    osc.start(now); osc.stop(now + 0.09);
+  } else if (type === 'correct') {
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(523.25, now);
+    osc.frequency.setValueAtTime(659.25, now + 0.09);
+    osc.frequency.setValueAtTime(783.99, now + 0.18);
+    gain.gain.setValueAtTime(0.11, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+    osc.start(now); osc.stop(now + 0.36);
+  } else if (type === 'gentle') {
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(340, now);
+    osc.frequency.exponentialRampToValueAtTime(280, now + 0.22);
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+    osc.start(now); osc.stop(now + 0.24);
+  } else if (type === 'lightup') {
+    osc.type = 'triangle';
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(freq, now + i * 0.08);
+      g.gain.setValueAtTime(0.09, now + i * 0.08);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.35);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(now + i * 0.08); o.stop(now + i * 0.08 + 0.36);
+    });
+  } else if (type === 'coin') {
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.setValueAtTime(1174.66, now + 0.07);
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    osc.start(now); osc.stop(now + 0.22);
+  }
+}
+
+function toggleSound() {
+  state.soundEnabled = !state.soundEnabled;
+  document.getElementById('btn-sound').textContent = state.soundEnabled ? '🔊' : '🔇';
+  if (state.soundEnabled) playTone('click');
+}
+
+// ============================================================================
+// 1. 完整六大領域隨機題庫 (38+ 題) ＋ 9 大突發試煉 ＋ 成就徽章
+// ============================================================================
+const GAME_DATA = {
+  gameMeta: {
+    title: "自立冒險島",
+    ccsaIndicators: [
+      "經濟能力", "財務管理", "自理生活",
+      "住所穩定", "就業能力", "學習能力",
+      "關係網絡", "問題解決", "心理能量"
+    ]
+  },
+  itemsMeta: {
+    social_worker_card: { name: "社工陪同卡", icon: "🤝", desc: "未成年時可代替家長同意書，解鎖租屋與求職限制。" },
+    good_citizen_card: { name: "良民證（保釋卡）", icon: "📜", desc: "面對深夜臨檢或特定求職時的安心證明。" },
+    health_insurance: { name: "健保防護", icon: "🏥", desc: "按時繳納健保，生病就醫時可大幅減少醫療花費。" },
+    accident_insurance: { name: "意外險護盾", icon: "⛑️", desc: "發生通勤擦撞或意外時，大幅減輕修車與醫療開銷。" },
+    emergency_fund: { name: "緊急備用金帳戶", icon: "🏦", desc: "為自己存下的安全墊，遇到失業或突發危機更有底氣。" }
+  },
+  achievementsMeta: {
+    combo_master: { name: "連對學霸", icon: "🔥" },
+    resource_seeker: { name: "求助超能力", icon: "🤝" },
+    anti_scam: { name: "防詐雷達", icon: "🛡️" },
+    housing_pro: { name: "有殼蝸牛", icon: "🏠" },
+    smart_saver: { name: "精算管家", icon: "💰" },
+    zen_soul: { name: "心靈旅人", icon: "🌸" },
+    hard_worker: { name: "職場達人", icon: "☕" }
+  },
+  islands: [
+    {
+      id: "resources",
+      badge: "啟",
+      name: "啟・領航廣場",
+      shortName: "領航廣場",
+      summary: "中央主島！自立不是孤軍奮戰，來冒險者大廳連結社工陪同、就業獎勵、良民證與急難救助。",
+      color: "#76B09A",
+      groundColor: "#A3C9A8",
+      q: 0, r: 0,
+      connectedTo: ["housing", "career", "finance", "wellness", "cyber"],
+      missions: [
+        {
+          id: "social_support",
+          title: "社福與資源連結挑戰",
+          requirement: "每次隨機抽 2 題｜解鎖【社工陪同卡】與獎勵金",
+          drawCount: 2,
+          rewardItem: "social_worker_card",
+          questions: [
+            {
+              q: "你還沒滿 18 歲，去租屋或找工作時，房東和老闆都要求「家長同意書」，但你無法聯絡原生家庭，這時可以找誰？",
+              options: [
+                {
+                  text: "聯繫 CCSA 或社福中心社工，申請「社工陪同」協助溝通",
+                  isCorrect: true,
+                  effects: { addItem: "social_worker_card", mood: 10, ccsa: { "關係網絡": 25, "問題解決": 20 } },
+                  feedback: "獲得【社工陪同卡】！自立不是要你一個人扛下所有事，當原生家庭無法支持時，社工就是你的合法後盾。"
+                },
+                {
+                  text: "自己拿別人的印章偽造一張同意書",
+                  isCorrect: false,
+                  effects: { mood: -10, ccsa: { "問題解決": 5 } },
+                  feedback: "被拒絕真的會很沮喪，但偽造文書會觸犯刑法喔！遇到未成年限制時，直接找社工陪同協助就對了。"
+                }
+              ]
+            },
+            {
+              q: "如果突然沒工作、存款快見底了，去「就業服務站」可以獲得哪些幫助？",
+              options: [
+                {
+                  text: "做職涯性向測驗、免費媒合工作，還可能申請到就業獎勵金",
+                  isCorrect: true,
+                  effects: { money: 1000, mood: 5, ccsa: { "關係網絡": 20, "就業能力": 15 } },
+                  feedback: "獲得就業獎勵金 $1,000！政府和民間有許多免費的正式資源，願意踏出第一步詢問，路就會寬很多。"
+                },
+                {
+                  text: "那裡只服務中年失業者，青少年不能去",
+                  isCorrect: false,
+                  effects: { ccsa: { "關係網絡": 5 } },
+                  feedback: "其實就服站有專門針對青年的職涯諮詢與獎勵方案，15 歲以上有求職需求都可以大方走進去問喔！"
+                }
+              ]
+            },
+            {
+              q: "生活中突然遇到法律糾紛（例如被惡房東威脅扣押金、不小心涉入詐騙官司），但沒錢請律師該怎麼辦？",
+              options: [
+                {
+                  text: "向「法律扶助基金會 (412-8518)」申請免費法律諮詢，或請社工協助轉介",
+                  isCorrect: true,
+                  effects: { security: 10, mood: 8, ccsa: { "問題解決": 25, "關係網絡": 15 } },
+                  feedback: "超實用的救命資源！法律扶助基金會提供免費法律諮詢，符合條件還能申請免費律師協助，千萬別自己硬扛。"
+                },
+                {
+                  text: "花錢請網路上號稱「保證勝訴」的不明代辦公司",
+                  isCorrect: false,
+                  effects: { money: -1500, mood: -10, ccsa: { "問題解決": 0 } },
+                  feedback: "網路上的不明代辦常會二次詐騙！遇到法律問題，先找法扶基金會或社工才是最安全合法的管道。"
+                }
+              ]
+            },
+            {
+              q: "想查詢各縣市有哪些急難救助、租屋補貼或食物銀行，可以撥打哪一支免付費的政府福利諮詢專線？",
+              options: [
+                {
+                  text: "1957 福利諮詢專線（每天早上 8 點到晚上 10 點都有專人接聽）",
+                  isCorrect: true,
+                  effects: { mood: 8, ccsa: { "關係網絡": 20, "學習能力": 15 } },
+                  feedback: "記起來 1957！只要遇到經濟困難、生活急難或想找社福資源，打這支免付費電話就會有專業社工為你指引方向。"
+                },
+                {
+                  text: "117 報時台",
+                  isCorrect: false,
+                  effects: { ccsa: { "學習能力": 5 } },
+                  feedback: "117 是報時台啦～記住「1957（你救我妻／福利諮詢）」才是衛福部的社會福利與急難救助諮詢專線喔！"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          id: "police_cert",
+          title: "警局良民證與法治防身",
+          requirement: "每次隨機抽 2 題｜解鎖【良民證（保釋卡）】",
+          drawCount: 2,
+          rewardItem: "good_citizen_card",
+          questions: [
+            {
+              q: "辦理「良民證（警察刑事紀錄證明）」在求職或生活中主要用來做什麼？",
+              options: [
+                {
+                  text: "證明自己無刑事犯罪紀錄，部分工作應徵或建立信任時會用到",
+                  isCorrect: true,
+                  effects: { addItem: "good_citizen_card", ccsa: { "問題解決": 15, "學習能力": 15 } },
+                  feedback: "獲得【良民證（保釋卡）】！保持良好紀錄，也能幫你在面對突發盤查或特定求職時更安心。"
+                },
+                {
+                  text: "拿到這張卡就可以免費搭公車和捷運",
+                  isCorrect: false,
+                  effects: { ccsa: { "學習能力": 5 } },
+                  feedback: "哈哈，它不能搭免費公車啦！它是用來證明無刑事犯罪紀錄的官方文件，對許多正式職缺很有幫助喔。"
+                }
+              ]
+            },
+            {
+              q: "如果接到不明電話威脅、懷疑遇到詐騙，或想確認某個打工／網購是不是騙局，應該打哪一支專線查證？",
+              options: [
+                {
+                  text: "165 反詐騙諮詢專線（24 小時免費查證）",
+                  isCorrect: true,
+                  effects: { security: 15, ccsa: { "問題解決": 20, "學習能力": 10 } },
+                  feedback: "沒錯！只要心裡覺得「怪怪的、好康到不像真的」，先掛斷電話打 165 問一下，就能避開 99% 的詐騙！"
+                },
+                {
+                  text: "直接照對方給的電話號碼回撥確認",
+                  isCorrect: false,
+                  effects: { security: -10, ccsa: { "問題解決": 0 } },
+                  feedback: "詐騙集團給的回撥號碼當然也是同夥接的！一定要自己主動撥打 165 或查詢官方網站電話喔。"
+                }
+              ]
+            },
+            {
+              q: "在外面遇到陌生人遞來外觀像咖啡包、糖果的「免費提神飲料」，還說大家都在喝不會上癮，該怎麼做？",
+              options: [
+                {
+                  text: "堅決拒絕並盡快離開現場，這極可能是偽裝的新興毒品",
+                  isCorrect: true,
+                  effects: { health: 10, security: 10, ccsa: { "自理生活": 20, "問題解決": 15 } },
+                  feedback: "太棒了！現在許多新興毒品會偽裝成毒咖啡包、彩虹菸或果凍，對來路不明的飲料與食物保持警覺就是保護自己。"
+                },
+                {
+                  text: "不好意思拒絕，先喝一口試試味道",
+                  isCorrect: false,
+                  effects: { health: -20, mood: -10, ccsa: { "自理生活": 0 } },
+                  feedback: "千萬別因為不好意思而嘗試！新興毒品混雜多種化學物質，只喝一口就可能危及生命。勇敢說「不用了，謝謝」直接離開最帥氣！"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "housing",
+      badge: "住",
+      name: "住・安心租屋村",
+      shortName: "安心租屋村",
+      summary: "高低錯落的暖色公寓！體驗入住自立宿舍公約、看房找 NG 點與避開租約陷阱。",
+      color: "#E08E6D",
+      groundColor: "#C7D9A7",
+      q: 1, r: -1,
+      connectedTo: ["resources", "career"],
+      missions: [
+        {
+          id: "dorm_apply",
+          title: "申請 CCSA 自立宿舍",
+          requirement: "每次隨機抽 2 題｜無年齡限制，適合起手練習",
+          drawCount: 2,
+          questions: [
+            {
+              q: "自立宿舍和一般旅館最大的差別是什麼？",
+              options: [
+                {
+                  text: "宿舍是「生活訓練場域」，要學習跟室友共處與生活管理",
+                  isCorrect: true,
+                  effects: { mood: 5, ccsa: { "住所穩定": 20, "關係網絡": 15 } },
+                  feedback: "答對了！自立宿舍是從機構轉銜到獨立租屋的安全緩衝空間，幫你先練好生活技能。"
+                },
+                {
+                  text: "只要住進去就完全不用管室友和生活公約",
+                  isCorrect: false,
+                  effects: { mood: -2, ccsa: { "住所穩定": 5 } },
+                  feedback: "差一點點！自立宿舍需要共同分擔公共區域清潔、遵守門禁與外宿預告，這是為了練習獨立生活的責任感喔。"
+                }
+              ]
+            },
+            {
+              q: "雖然自立宿舍不收伙食費與水電費，但如果這個月薪水不小心花光了、個人生活費吃緊或達不到儲蓄目標，該怎麼辦？",
+              options: [
+                {
+                  text: "主動找社工或生輔員討論財務規劃",
+                  isCorrect: true,
+                  effects: { mood: 5, ccsa: { "問題解決": 20, "財務管理": 15 } },
+                  feedback: "很棒的選擇！在宿舍裡遇到財務困難，正是跟社工一起練習理財與找資源的好機會，千萬別逃避或借高利貸。"
+                },
+                {
+                  text: "先躲起來不接電話，或是去網路上借小額貸款",
+                  isCorrect: false,
+                  effects: { mood: -5, ccsa: { "問題解決": 5 } },
+                  feedback: "遇到壓力想逃避很正常，但借高利貸會讓雪球越滾越大。下次記得，社工是你的後盾，開口討論最快解決！"
+                }
+              ]
+            },
+            {
+              q: "住在自立宿舍期間，晚上想臨時去朋友家過夜，應該怎麼做？",
+              options: [
+                {
+                  text: "依照宿舍規定提前預告或請假，落實生活責信與安全回報",
+                  isCorrect: true,
+                  effects: { mood: 5, ccsa: { "住所穩定": 15, "自理生活": 15 } },
+                  feedback: "很負責任！提前告知外宿不是限制自由，而是讓關心你的社工與室友確認你的安全，也是成年人守信的表現。"
+                },
+                {
+                  text: "直接不講就消失，反正我也快成年了",
+                  isCorrect: false,
+                  effects: { mood: -5, ccsa: { "住所穩定": 5 } },
+                  feedback: "突然失聯會讓生輔員非常擔心你的安危喔！學會提前溝通報備，團體生活會更順利。"
+                }
+              ]
+            },
+            {
+              q: "在宿舍和室友因為「公共區域沒打掃」或「半夜講電話太大聲」起爭執，最好的做法是？",
+              options: [
+                {
+                  text: "冷靜表達自己的感受與界線，或請生輔員協助召開室友會議協調",
+                  isCorrect: true,
+                  effects: { mood: 8, ccsa: { "關係網絡": 20, "問題解決": 15 } },
+                  feedback: "超成熟的溝通力！合租生活難免有摩擦，用「我訊息」和平溝通加上公約輪值表，能避免關係破裂。"
+                },
+                {
+                  text: "直接把室友的東西丟出門，或在網路上公審他",
+                  isCorrect: false,
+                  effects: { mood: -10, ccsa: { "關係網絡": 0 } },
+                  feedback: "生氣很正常，但破壞物品或網路公審不只傷和氣還可能挨告。先深呼吸，找生輔員當中間人協調會有效很多！"
+                }
+              ]
+            },
+            {
+              q: "住進自立宿舍後，你可以私自複製宿舍鑰匙給男／女朋友隨時進出嗎？",
+              options: [
+                {
+                  text: "絕對不行！宿舍有訪客與門禁安全規定，要保護所有室友隱私",
+                  isCorrect: true,
+                  effects: { security: 10, ccsa: { "住所穩定": 15, "自理生活": 10 } },
+                  feedback: "正確！尊重他人的居住安全與隱私，無論是住宿舍還是未來在外合租，都是最重要的基本禮儀。"
+                },
+                {
+                  text: "只要室友沒發現，偷偷複製一把沒關係",
+                  isCorrect: false,
+                  effects: { security: -10, ccsa: { "住所穩定": 0 } },
+                  feedback: "這屬於嚴重的安全違規喔！如果發生意外或財物遺失會非常麻煩，守住門禁界線才能保護彼此。"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          id: "rent_house",
+          title: "租屋看房與合約實戰",
+          requirement: "每次隨機抽 2 題｜需滿 18 歲或持有【社工陪同卡】",
+          drawCount: 2,
+          reqAgeOrItem: { minAge: 18, altItem: "social_worker_card" },
+          questions: [
+            {
+              q: "看房時，以下哪一個狀況屬於「高風險 NG 點」，建議直接跳過？",
+              options: [
+                {
+                  text: "熱水器裝在室內密閉浴室，而且房間沒有對外窗",
+                  isCorrect: true,
+                  effects: { money: -2500, health: 10, ccsa: { "住所穩定": 25, "自理生活": 15 } },
+                  feedback: "好眼力！熱水器裝室內容易一氧化碳中毒，沒有對外窗也會影響逃生與身心健康，安全永遠排第一。"
+                },
+                {
+                  text: "離捷運站要走 10 分鐘，而且家具比較舊",
+                  isCorrect: false,
+                  effects: { health: -5, ccsa: { "住所穩定": 10 } },
+                  feedback: "家具舊或走點路都還能克服，但「頂樓加蓋、無滅火器、熱水器裝室內」這類安全隱患才是最危險的 NG 點喔！"
+                }
+              ]
+            },
+            {
+              q: "簽租約時，房東說：「為了保障我，你的身分證正本先押在我這裡，押金收 3 個月。」這合法嗎？",
+              options: [
+                {
+                  text: "不合法！押金最多只能收 2 個月，且絕對不能扣留身分證正本",
+                  isCorrect: true,
+                  effects: { security: 10, ccsa: { "住所穩定": 20, "問題解決": 15 } },
+                  feedback: "太專業了！法律規定押金上限是 2 個月，身分證正本也絕對不能交給別人，以免被拿去當人頭戶。"
+                },
+                {
+                  text: "房東最大，為了趕快有地方住只好答應",
+                  isCorrect: false,
+                  effects: { money: -1500, security: -15, ccsa: { "住所穩定": 5 } },
+                  feedback: "急著找房時很容易妥協，但扣留證件風險極高！記得押金上限是 2 個月，遇到怪條款可以先拍照問社工。"
+                }
+              ]
+            },
+            {
+              q: "網路上看到一間裝潢超美、租金卻只有市價一半的套房，房東說：「看房的人很多，先匯 3,000 元訂金我才帶你看房！」該匯嗎？",
+              options: [
+                {
+                  text: "不匯！還沒親眼看到房子與確認屋主身分前，絕不先匯款",
+                  isCorrect: true,
+                  effects: { security: 15, ccsa: { "住所穩定": 20, "問題解決": 15 } },
+                  feedback: "防詐成功！這是最常見的「假房東預付訂金詐騙」，一定要現場看過屋況、核對房東身分證再簽約付錢。"
+                },
+                {
+                  text: "這麼便宜不搶就沒了，趕快先轉帳卡位",
+                  isCorrect: false,
+                  effects: { money: -3000, mood: -10, ccsa: { "住所穩定": 0 } },
+                  feedback: "轉完帳對方就封鎖你了... 記得租屋鐵則：「沒看房不付錢，太便宜必有詐！」"
+                }
+              ]
+            },
+            {
+              q: "入住第一天，發現冷氣滴水、牆壁有刮痕，為了避免退租時被房東亂扣押金，你應該先做什麼？",
+              options: [
+                {
+                  text: "立刻拍照錄影存證，傳訊給房東確認屋況並保留對話紀錄",
+                  isCorrect: true,
+                  effects: { mood: 5, ccsa: { "住所穩定": 20, "自理生活": 15 } },
+                  feedback: "超細心！入住點交時拍照存證（含電表度數），退租時就不怕發生「原本就壞的東西算在你頭上」的糾紛。"
+                },
+                {
+                  text: "不想麻煩房東，自己默默忍耐不講",
+                  isCorrect: false,
+                  effects: { money: -1000, ccsa: { "住所穩定": 5 } },
+                  feedback: "沒留紀錄的話，退租時很容易被誤會是你弄壞的喔！有禮貌地傳照片報備，是保護自己也保護房東的好習慣。"
+                }
+              ]
+            },
+            {
+              q: "租屋簽約時，看到「電費一度收 8 元」，而且租金超便宜，你應該注意什麼？",
+              options: [
+                {
+                  text: "確認最新租屋電費規定（不可超過台電當期每度平均電價），並試算夏天總開銷",
+                  isCorrect: true,
+                  effects: { money: 500, ccsa: { "財務管理": 15, "住所穩定": 20 } },
+                  feedback: "精打細算！高電價常常是「低租金陷阱」，台灣新法已規範房東不得超收電費，簽約前一定要問清楚喔。"
+                },
+                {
+                  text: "一度 8 元聽起來很少，直接簽下去就好",
+                  isCorrect: false,
+                  effects: { money: -1500, ccsa: { "財務管理": 0 } },
+                  feedback: "夏天吹冷氣一個月動輒 300 度，一度 8 元就要 2,400 元！看房時務必把水電、管理費一起算進預算。"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "career",
+      badge: "職",
+      name: "職・夢想工坊",
+      shortName: "夢想工坊",
+      summary: "紅磚咖啡廳與文創工作坊！搞懂勞基法權益、發揮特質，還能隨時快速打工賺取生活費。",
+      color: "#C96A5B",
+      groundColor: "#BFD6A4",
+      q: 1, r: 0,
+      connectedTo: ["resources", "housing", "finance"],
+      missions: [
+        {
+          id: "job_interview",
+          title: "面試與勞動權益實戰",
+          requirement: "每次隨機抽 2 題｜消耗 10 體力，通過可賺取薪資",
+          drawCount: 2,
+          questions: [
+            {
+              q: "咖啡廳店長面試時說：「前 3 個月是試用期，時薪先算你 150 元，做得好再調回基本工資。」你該怎麼看？",
+              options: [
+                {
+                  text: "這違反勞基法！試用期薪水一樣不能低於法定基本工資",
+                  isCorrect: true,
+                  effects: { money: 3000, health: -10, ccsa: { "就業能力": 25, "經濟能力": 20 } },
+                  feedback: "懂法律就是你的護身符！無論是不是試用期，只要受僱工作，薪水都不能低於法定基本工資喔。"
+                },
+                {
+                  text: "反正我是新手，少拿一點當作學經驗沒關係",
+                  isCorrect: false,
+                  effects: { money: 1500, health: -10, mood: -5, ccsa: { "就業能力": 8, "經濟能力": 10 } },
+                  feedback: "願意學習很棒，但你的勞力一樣值得合法報酬！記住，試用期低於基本工資是違法的，別讓權益睡著了。"
+                }
+              ]
+            },
+            {
+              q: "週末休假時，你有空檔可以安排，以下哪個選擇最能幫未來的自己加分？",
+              options: [
+                {
+                  text: "參加免費線上職訓或考取餐飲／咖啡師等專業證照",
+                  isCorrect: true,
+                  effects: { health: -5, mood: 8, ccsa: { "學習能力": 30, "就業能力": 20 } },
+                  feedback: "這就是「投資自己」！雖然當下沒立刻進帳，但多一張證照能幫你解鎖更高薪、更穩定的工作。"
+                },
+                {
+                  text: "連續 10 天不停加班，完全不休息",
+                  isCorrect: false,
+                  effects: { money: 1500, health: -20, mood: -15, ccsa: { "學習能力": 5, "經濟能力": 10 } },
+                  feedback: "努力賺錢很辛苦，但身體和心情如果亮紅燈，後續醫療費反而更花錢。適度休息與進修才能走得長遠！"
+                }
+              ]
+            },
+            {
+              q: "打工時不小心遲到了 10 分鐘，老闆氣沖沖說：「遲到一次扣 1,000 元薪水！」這樣合法嗎？",
+              options: [
+                {
+                  text: "不合法！老闆只能依未出勤的實際比例扣薪，不能隨意重罰",
+                  isCorrect: true,
+                  effects: { money: 2500, health: -10, ccsa: { "就業能力": 25, "問題解決": 15 } },
+                  feedback: "答對了！雖然遲到不對要改進，但依勞基法雇主只能按實際遲到分鐘數比例扣薪，溢扣薪資是違法的喔。"
+                },
+                {
+                  text: "是我自己遲到在先，被扣 1,000 元活該",
+                  isCorrect: false,
+                  effects: { money: 1000, mood: -10, ccsa: { "就業能力": 5 } },
+                  feedback: "準時上班很重要，但也要知道「遲到 10 分鐘扣千元」已經違反勞基法！記得保留打卡紀錄保護自己。"
+                }
+              ]
+            },
+            {
+              q: "剛滿 15 歲的童工想找打工，以下哪一個說法符合台灣《勞動基準法》的保護規定？",
+              options: [
+                {
+                  text: "不能從事危險性工作（如工地高空作業），且不得在晚上 8 點至隔日清晨 6 點工作",
+                  isCorrect: true,
+                  effects: { money: 2200, health: -5, ccsa: { "就業能力": 20, "學習能力": 20 } },
+                  feedback: "完全正確！法律對未滿 16 歲童工有特別保護，禁止夜班與危險工作，也要有法定代理人或社工協助確認喔。"
+                },
+                {
+                  text: "只要我體力好，去工地搬鋼筋或做大夜班都可以",
+                  isCorrect: false,
+                  effects: { health: -15, ccsa: { "就業能力": 5 } },
+                  feedback: "安全第一！法律禁止未成年從事危險工作與童工大夜班，就是為了避免發生嚴重的職業災害。"
+                }
+              ]
+            },
+            {
+              q: "面試官問你：「你之前沒有餐飲經驗，為什麼我們要錄取你？」哪個回答最加分？",
+              options: [
+                {
+                  text: "「雖然是第一次，但我守時、學習快，也願意從基礎洗碗點餐認真學起！」",
+                  isCorrect: true,
+                  effects: { money: 2800, mood: 8, ccsa: { "就業能力": 25, "關係網絡": 15 } },
+                  feedback: "超棒的面試態度！雇主找工讀生最看重「準時、有禮貌、願意學」，展現你的誠意與優勢就對了。"
+                },
+                {
+                  text: "「不知道耶，我就缺錢才來投履歷的。」",
+                  isCorrect: false,
+                  effects: { mood: -5, ccsa: { "就業能力": 5 } },
+                  feedback: "誠實雖可愛，但面試時多說一點自己的優點（例如守時、親切、手腳俐落），錄取機率會高非常多喔！"
+                }
+              ]
+            },
+            {
+              q: "去餐廳打工第一天，老闆說：「你是兼職工讀生，公司不用幫你保勞保啦！」這是真的嗎？",
+              options: [
+                {
+                  text: "假的！就算只打工一天，雇主也必須依法申報勞保（職災保險）與提繳 6% 勞退",
+                  isCorrect: true,
+                  effects: { money: 2600, security: 10, ccsa: { "就業能力": 25, "自理生活": 15 } },
+                  feedback: "超關鍵的職場常識！如果沒保勞保，上班途中車禍或切傷手就沒有職災給付，到職當天一定要確認有沒有加保！"
+                },
+                {
+                  text: "好像有道理，兼職本來就沒有保險吧",
+                  isCorrect: false,
+                  effects: { health: -8, ccsa: { "就業能力": 5 } },
+                  feedback: "別被話術騙了！不管正職還是兼職工讀生，都有權利享有職業災害保險與勞退提繳喔。"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "finance",
+      badge: "財",
+      name: "財・金幣市集",
+      shortName: "金幣市集",
+      summary: "圓頂銀行與熱鬧市集！分清需要與想要、避開先買後付陷阱，也能在小舖購買生活補給與保險。",
+      color: "#E3B252",
+      groundColor: "#D6DBA6",
+      q: 0, r: 1,
+      connectedTo: ["resources", "career", "wellness"],
+      missions: [
+        {
+          id: "budget_bnpl",
+          title: "記帳與消費陷阱考驗",
+          requirement: "每次隨機抽 2 題｜學習管理現金流與風險預備",
+          drawCount: 2,
+          questions: [
+            {
+              q: "發薪水了！網購跳出最新款手機，廣告寫著「免信用卡！BNPL 先買後付，分 12 期輕鬆帶回家」，你會怎麼決定？",
+              options: [
+                {
+                  text: "先檢查收支與緊急備用金，舊手機還能用就先不買",
+                  isCorrect: true,
+                  effects: { money: 1000, ccsa: { "財務管理": 25, "經濟能力": 15 } },
+                  feedback: "超穩的財務判斷！先買後付雖然當下沒感覺，但每期自動扣款加上違約金，很容易讓生活陷入週轉不靈。"
+                },
+                {
+                  text: "分期看起來好便宜，先買來犒賞自己再說",
+                  isCorrect: false,
+                  effects: { money: -2000, mood: 5, ccsa: { "財務管理": 5 } },
+                  feedback: "想犒賞自己很正常，但這就是「想要」與「需要」的拉扯。記得先留好房租與緊急備用金，再考慮分期消費喔！"
+                }
+              ]
+            },
+            {
+              q: "為了避免突然生病或車禍導致存款歸零，平常最建議做哪兩件事？",
+              options: [
+                {
+                  text: "按時繳納健保費，並慢慢存下 3 個月生活費當「緊急備用金」",
+                  isCorrect: true,
+                  effects: { money: -400, addItem: "health_insurance", ccsa: { "財務管理": 25, "自理生活": 20 } },
+                  feedback: "獲得【健保防護】道具！有備用金和保險，遇到突發意外就不會瞬間被打垮。"
+                },
+                {
+                  text: "把所有錢都拿去買高風險飆股，賭一把大的",
+                  isCorrect: false,
+                  effects: { money: -1500, security: -10, ccsa: { "財務管理": 5 } },
+                  feedback: "想快速翻身的心情可以理解，但高報酬往往伴隨高風險（甚至可能是詐騙），穩穩存下備用金才是最踏實的防線。"
+                }
+              ]
+            },
+            {
+              q: "剛領到第一份薪水，為了避免月底變成「月光族」，哪一種理財順序最有效？",
+              options: [
+                {
+                  text: "「收入 － 儲蓄 ＝ 支出」：一領薪水先把固定比例存起來，剩下的再分配生活費",
+                  isCorrect: true,
+                  effects: { money: 800, ccsa: { "財務管理": 25, "經濟能力": 15 } },
+                  feedback: "理財黃金公式！先存錢再花錢，哪怕每個月只先存 1,000 元，一年下來也能累積出滿滿的安全感。"
+                },
+                {
+                  text: "「收入 － 支出 ＝ 儲蓄」：想買什麼就買，月底有剩再存",
+                  isCorrect: false,
+                  effects: { money: -500, ccsa: { "財務管理": 5 } },
+                  feedback: "這招通常月底都會變成 0 元喔！試試領薪水當天就把儲蓄轉到另一個帳戶，成功率會高很多。"
+                }
+              ]
+            },
+            {
+              q: "記帳時，以下哪一組分類最符合區分「需要 (Needs)」與「想要 (Wants)」的原則？",
+              options: [
+                {
+                  text: "房租、三餐、健保是「需要」；手搖飲、限量公仔、遊戲課金是「想要」",
+                  isCorrect: true,
+                  effects: { money: 600, ccsa: { "財務管理": 20, "自理生活": 15 } },
+                  feedback: "分得清清楚楚！並不是完全不能花「想要」的錢，而是先確保「需要」的預算足夠，再給自己一點娛樂額度。"
+                },
+                {
+                  text: "最新款球鞋和每天一杯珍奶都是基本生存「需要」",
+                  isCorrect: false,
+                  effects: { money: -600, ccsa: { "財務管理": 5 } },
+                  feedback: "珍奶雖然療癒，但如果每天喝一杯一個月也要快 2,000 元呢！學會偶爾犒賞自己，荷包會感謝你的。"
+                }
+              ]
+            },
+            {
+              q: "收到銀行信用卡帳單，發現這個月刷太兇繳不出來，只繳「最低應繳金額」會發生什麼事？",
+              options: [
+                {
+                  text: "沒繳清的部分會開始計算高昂的循環利息，還可能影響個人信用評分",
+                  isCorrect: true,
+                  effects: { security: 10, ccsa: { "財務管理": 25, "問題解決": 10 } },
+                  feedback: "超重要的信用觀念！信用卡循環利率最高可達 15%，一旦滾起卡債會非常難脫身，刷卡前務必量力而為。"
+                },
+                {
+                  text: "只要有繳最低金額就完全免利息，慢慢還就好",
+                  isCorrect: false,
+                  effects: { money: -1200, ccsa: { "財務管理": 0 } },
+                  feedback: "千萬別掉進「最低應繳」的溫水煮青蛙陷阱！高利息會讓欠款越滾越大，盡量全額繳清才安全。"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "wellness",
+      badge: "心",
+      name: "心・能量花園",
+      shortName: "能量花園",
+      summary: "櫻花木亭、溫暖營火與許願池！累了就來這裡深呼吸，照顧好自己的心理能量與身體健康。",
+      color: "#E892A5",
+      groundColor: "#B7D9B4",
+      q: -1, r: 1,
+      connectedTo: ["resources", "finance", "cyber"],
+      missions: [
+        {
+          id: "calm_breathing",
+          title: "情緒照顧與身心韌性挑戰",
+          requirement: "每次隨機抽 2 題｜完成後點亮花園並恢復大量心情",
+          drawCount: 2,
+          questions: [
+            {
+              q: "最近工作被念、房租又快到期，覺得整個人快爆炸、畫面都變灰暗了，哪種方式最能幫你真正「充電」？",
+              options: [
+                {
+                  text: "先做幾次深呼吸，找信任的朋友聊聊，或預約免費心理諮商",
+                  isCorrect: true,
+                  effects: { mood: 20, health: 10, ccsa: { "心理能量": 30, "自理生活": 15 } },
+                  feedback: "心情值大幅恢復！承認自己「現在很累、需要幫忙」，其實是非常勇敢且有韌性的表現。"
+                },
+                {
+                  text: "把所有情緒悶在心裡，熬夜滑手機或借酒澆愁",
+                  isCorrect: false,
+                  effects: { mood: -5, health: -10, ccsa: { "心理能量": 8 } },
+                  feedback: "壓力大時想麻痺自己是很常見的反應，但隔天醒來只會更累。下次覺得喘不過氣，隨時回來這座花園深呼吸喔。"
+                }
+              ]
+            },
+            {
+              q: "如果發現自己連續兩週都睡不好、對原本喜歡的事情提不起勁，甚至覺得很絕望，台灣有哪些免費的支持資源？",
+              options: [
+                {
+                  text: "撥打 1925 安心專線、1980 張老師，或使用衛福部「青壯世代心理健康支持方案」免費諮商",
+                  isCorrect: true,
+                  effects: { mood: 15, ccsa: { "心理能量": 25, "關係網絡": 20 } },
+                  feedback: "記起來這幾組救命號碼！政府現在提供 15–45 歲每人免費 3 次心理諮商，照顧心靈就跟感冒看醫生一樣自然。"
+                },
+                {
+                  text: "一定是我想太多了，撐過去就好，看身心科很丟臉",
+                  isCorrect: false,
+                  effects: { mood: -8, ccsa: { "心理能量": 5 } },
+                  feedback: "心理感冒跟身體感冒一樣，都需要專業照顧，一點都不丟臉！願意開口求助，才是真正愛自己的開始。"
+                }
+              ]
+            },
+            {
+              q: "為了省房租和存錢，你決定每天三餐都只吃一碗泡麵，長期下來會發生什麼事？",
+              options: [
+                {
+                  text: "營養不良、體力下滑又容易生病，最後花的醫藥費可能比省下的飯錢還多",
+                  isCorrect: true,
+                  effects: { health: 15, mood: 5, ccsa: { "自理生活": 25, "財務管理": 10 } },
+                  feedback: "非常正確！想省錢可以學著去超市買雞蛋、青菜自己簡單煮，吃得健康才有體力繼續打拚。"
+                },
+                {
+                  text: "只要吃得飽就好，年輕人身體不會出問題",
+                  isCorrect: false,
+                  effects: { health: -15, ccsa: { "自理生活": 5 } },
+                  feedback: "年輕時雖然感覺不明顯，但長期高鈉缺蛋白質會讓專注力和免疫力大降。照顧身體也是一種省錢喔！"
+                }
+              ]
+            },
+            {
+              q: "剛到新職場被前輩兇了一頓，心裡又氣又委屈，當下覺得「我什麼都做不好，乾脆明天直接不去了！」這時可以怎麼轉念？",
+              options: [
+                {
+                  text: "先深呼吸把「情緒」和「事實」分開：新人本來就需要學習，給自己一點練習時間",
+                  isCorrect: true,
+                  effects: { mood: 15, ccsa: { "心理能量": 25, "就業能力": 15 } },
+                  feedback: "超棒的心理韌性！這就是「成長型思維」——一次被糾正不代表你不好，只是你還在變強的路上。"
+                },
+                {
+                  text: "直接已讀不回搞失蹤，反正我就是爛",
+                  isCorrect: false,
+                  effects: { mood: -10, ccsa: { "心理能量": 5 } },
+                  feedback: "被兇真的會很難過，但千萬別急著否定自己！即使最後真的不適合，也要好好溝通離職，保護自己的信用與薪水。"
+                }
+              ]
+            },
+            {
+              q: "在親密關係或友誼中，對方常說「如果你真的愛我，就要聽我的／讓我查你手機」，這代表什麼？",
+              options: [
+                {
+                  text: "這已經侵犯了個人界線，健康的關係應該建立在尊重、信任與平等上",
+                  isCorrect: true,
+                  effects: { mood: 10, security: 10, ccsa: { "關係網絡": 25, "心理能量": 20 } },
+                  feedback: "很棒的情感界線意識！真正的愛會讓你感到安心與自由，而不是恐懼或被控制。遇到情感暴力也可撥打 113。"
+                },
+                {
+                  text: "對方只是太在乎我，全部配合他就不會吵架了",
+                  isCorrect: false,
+                  effects: { mood: -10, ccsa: { "關係網絡": 5 } },
+                  feedback: "過度控制並不是愛喔！如果一段關係讓你一直感到害怕或委屈，記得找社工或信任的大人聊聊。"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: "cyber",
+      badge: "戰",
+      name: "戰・生活試煉場",
+      shortName: "生活試煉場",
+      summary: "露天互動舞台與守護盾牌！識破數位詐騙、假投資、一頁式網購陷阱，演練數位生存防禦力。",
+      color: "#7C88C4",
+      groundColor: "#B9C9C9",
+      q: -1, r: 0,
+      connectedTo: ["resources", "wellness"],
+      missions: [
+        {
+          id: "cyber_defense",
+          title: "數位防詐與媒體識讀試煉",
+          requirement: "每次隨機抽 2 題｜大幅提升資安防禦值",
+          drawCount: 2,
+          questions: [
+            {
+              q: "滑社群看到「名牌球鞋限時破盤價 499 元、貨到付款、僅此一頁」，網頁沒有公司地址和客服電話，這是什麼？",
+              options: [
+                {
+                  text: "典型的一頁式廣告詐騙，直接關掉不買",
+                  isCorrect: true,
+                  effects: { security: 15, ccsa: { "問題解決": 20, "財務管理": 15 } },
+                  feedback: "防詐雷達全開！一頁式詐騙常利用「限時特價、貨到付款」讓你卸下心防，結果寄來劣質品還求償無門。"
+                },
+                {
+                  text: "既然可以貨到付款就沒風險，先下單搶便宜",
+                  isCorrect: false,
+                  effects: { money: -500, security: -10, ccsa: { "財務管理": 5 } },
+                  feedback: "很多人以為貨到付款很安全，但超商取貨付款後往往無法現場拆封退貨。下次記得先查賣家評價與聯絡方式！"
+                }
+              ]
+            },
+            {
+              q: "手遊抽卡抽了 9 次都沒中大獎，心裡想「機率 10%，下次一定會中！」決定再課金，這想法正確嗎？",
+              options: [
+                {
+                  text: "不正確！每次抽卡都是「獨立事件」，要設定停損點並避免儲存信用卡號",
+                  isCorrect: true,
+                  effects: { security: 15, money: 500, ccsa: { "學習能力": 20, "財務管理": 15 } },
+                  feedback: "太聰明了！數學上每次抽卡都是獨立事件，不會因為前面沒中就變高。設定預算停損點才能守住薪水喔！"
+                },
+                {
+                  text: "沒錯，都花那麼多錢了，不抽到太可惜了",
+                  isCorrect: false,
+                  effects: { money: -1500, mood: -5, ccsa: { "學習能力": 5 } },
+                  feedback: "這就是常見的沉沒成本陷阱！遊戲卡片推陳出新，別讓衝動課金吃掉辛苦賺來的生活費。"
+                }
+              ]
+            },
+            {
+              q: "社群動態出現聳動文章：「震驚！某車站爆發未知病毒，快轉傳給親友！」你應該先做什麼？",
+              options: [
+                {
+                  text: "先用「台灣事實查核中心」或「Cofacts 真的假的」查證，不隨便轉傳",
+                  isCorrect: true,
+                  effects: { security: 15, ccsa: { "學習能力": 20, "問題解決": 15 } },
+                  feedback: "超強媒體識讀力！隨意散布未經查證的假訊息造成恐慌，可能會觸犯《社會秩序維護法》喔。"
+                },
+                {
+                  text: "寧可信其有，立刻轉發到所有群組提醒大家",
+                  isCorrect: false,
+                  effects: { mood: -8, security: -10, ccsa: { "學習能力": 5 } },
+                  feedback: "善意提醒很暖心，但如果轉發的是假新聞反而會造成恐慌甚至挨罰！花 10 秒查證一下最安全。"
+                }
+              ]
+            },
+            {
+              q: "在外面連上咖啡廳或車站的「免費公開 Wi-Fi」，以下哪件事絕對不要在這時候做？",
+              options: [
+                {
+                  text: "登入網路銀行轉帳、輸入信用卡號或網購結帳",
+                  isCorrect: true,
+                  effects: { security: 15, ccsa: { "問題解決": 15, "自理生活": 15 } },
+                  feedback: "資安滿分！公共免費 Wi-Fi 容易被駭客攔截封包，處理銀行帳務或輸入重要密碼時，記得切回自己的行動網路。"
+                },
+                {
+                  text: "查公車時刻表或看天氣預報",
+                  isCorrect: false,
+                  effects: { security: -8, ccsa: { "問題解決": 5 } },
+                  feedback: "查公車和天氣沒關係，但「登入網銀、刷卡輸入密碼」這類涉及個資與金錢的操作，千萬別在公開 Wi-Fi 做喔！"
+                }
+              ]
+            },
+            {
+              q: "收到一封簡訊寫著：「您的水電費／交通罰單逾期未繳，請點擊短網址立即補繳以免停水！」點進去前該怎麼判斷？",
+              options: [
+                {
+                  text: "不點陌生短網址！直接打官方客服或用官方 App 查詢，並檢查網址是否為 .gov.tw",
+                  isCorrect: true,
+                  effects: { security: 20, ccsa: { "問題解決": 20, "財務管理": 10 } },
+                  feedback: "釣魚簡訊退散！詐騙集團超愛假冒水電、罰單、ETag 寄送釣魚連結偷取信用卡號，直接找官方管道查最保險。"
+                },
+                {
+                  text: "怕被停水好緊張，趕快點進去輸入卡號繳掉",
+                  isCorrect: false,
+                  effects: { money: -2000, security: -15, ccsa: { "問題解決": 0 } },
+                  feedback: "糟了，那是釣魚網站，卡號被盜刷了！記得：政府機關網址一定有 .gov.tw，收到催繳簡訊先冷靜查證。"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  randomEvents: [
+    {
+      id: "money_mule",
+      title: "突發私訊：輕鬆日賺 3,000 元？",
+      desc: "手機跳出陌生私訊：「缺錢嗎？只要把提款卡借我們公司走帳，或是幫忙去超商領包裹，一天現領 3,000 元！」",
+      choices: [
+        {
+          text: "直接封鎖並撥打 165 反詐騙專線查證",
+          effects: { security: 15, mood: 5, ccsa: { "問題解決": 20, "心理能量": 10 } },
+          unlockBadge: "anti_scam",
+          feedback: "太棒了！這就是典型的「人頭戶／車手」求職陷阱，你成功守住了自己的人生與清白。"
+        },
+        {
+          text: "最近真的很缺錢，只做這一次應該沒關係吧...",
+          effects: { money: -3000, mood: -20, security: -20, ccsa: { "問題解決": 0 } },
+          feedback: "糟了！這是詐騙集團的車手邀約，不僅帳戶會被凍結，還會涉犯洗錢防制法面臨罰金與刑責。缺錢時記得去「啟・領航廣場」申請急難救助金！"
+        }
+      ]
+    },
+    {
+      id: "romance_scam",
+      title: "交友軟體的溫柔陷阱",
+      desc: "心情低落時在交友軟體認識一位很聊得來的網友，對方突然說家裡急需醫藥費想跟你借 2,000 元，還暗示希望你傳私密照當作「信任的證明」。",
+      securityHint: { threshold: 65, text: "🛡️ 資安雷達提示：系統偵測到對方頭貼是網路盜圖，請提高警覺！" },
+      choices: [
+        {
+          text: "委婉拒絕借錢與傳照，保持安全界線",
+          effects: { security: 15, ccsa: { "心理能量": 20, "關係網絡": 15 } },
+          unlockBadge: "anti_scam",
+          feedback: "做得好！真正的關心不會用金錢或私密照來測試你。守住界線，就不會落入感情詐騙或私密照勒索的圈套。"
+        },
+        {
+          text: "怕對方生氣不理我，只好匯款或傳照片",
+          effects: { money: -2000, mood: -25, ccsa: { "心理能量": 0 } },
+          feedback: "對方收到後就開始威脅勒索，讓你壓力爆表... 別獨自承受！如果現實中遇到私密照外流威脅，立刻截圖保留證據，撥打 113 或找社工與警方協助。"
+        }
+      ]
+    },
+    {
+      id: "police_raid",
+      title: "深夜公園的警察臨檢",
+      desc: "晚上在外面逗留時遇到員警例行盤查，詢問你的身分與目前居住狀況。",
+      choices: [
+        {
+          text: "冷靜配合出示證件（若持有「良民證」直接加分過關）",
+          itemCheck: { item: "good_citizen_card", bonusFeedback: "✨ 你出示了【良民證】並冷靜說明，員警確認無誤後還提醒你早點回家休息！(心情 +5)" },
+          effects: { mood: -5, ccsa: { "問題解決": 15 } },
+          feedback: "配合盤查順利過關！如果目前沒有穩定住所，記得盡快去「住・安心租屋村」申請自立宿舍，睡公園風險太高了。"
+        },
+        {
+          text: "覺得緊張，轉身拔腿就跑",
+          effects: { money: -1000, health: -10, mood: -15, ccsa: { "問題解決": 0 } },
+          feedback: "一跑反而引起誤會，被帶回警局盤問浪費了好多時間與體力。遇到臨檢保持冷靜配合，或尋求社工協助才是最安全的做法。"
+        }
+      ]
+    },
+    {
+      id: "accident_sick",
+      title: "突發狀況：重感冒發燒",
+      desc: "連續忙碌加上天氣變化，你突然發高燒、全身無力，必須去看醫生並請假休息。",
+      choices: [
+        {
+          text: "立刻就醫並好好休息（若有「健保防護」可大幅省錢）",
+          itemCheck: { item: "health_insurance", moneyOverride: -200, bonusFeedback: "🏥 還好你之前有按時繳納【健保】，掛號費只花了 200 元就順利拿藥康復！" },
+          effects: { money: -1200, health: 15, ccsa: { "自理生活": 20 } },
+          feedback: "身體健康才是自立的本錢！生病時別硬撐，提早看醫生花小錢，才不會拖成大病花大錢。"
+        },
+        {
+          text: "為了省錢不看醫生，繼續撐著去上班",
+          effects: { health: -25, mood: -15, ccsa: { "自理生活": 0 } },
+          feedback: "硬撐的結果反而讓病情加重，最後還是被迫停工好幾天。記得，照顧好身體是最重要的事！"
+        }
+      ]
+    },
+    {
+      id: "atm_scam",
+      title: "客服來電：誤設分期付款？",
+      desc: "接到自稱網購客服的電話，語氣急促地說：「作業疏失把你設成 12 期批發商扣款，今晚 12 點前快去 ATM 操作解除分期！」",
+      securityHint: { threshold: 60, text: "🛡️ 資安雷達提示：來電顯示開頭有「+886」，極可能是境外竄改詐騙電話！" },
+      choices: [
+        {
+          text: "直接掛斷！ATM 根本沒有「解除分期」的功能",
+          effects: { security: 15, ccsa: { "問題解決": 20, "財務管理": 15 } },
+          unlockBadge: "anti_scam",
+          feedback: "識破率 100%！凡是叫你去操作 ATM 或網銀轉帳來「解除設定、身分驗證」的，通通都是詐騙。"
+        },
+        {
+          text: "好怕被扣款，照著對方指示去超商按 ATM",
+          effects: { money: -3000, mood: -20, security: -15, ccsa: { "財務管理": 0 } },
+          feedback: "哎呀，存款被轉走了... 詐騙集團最愛利用「限時、急迫」讓你來不及思考。下次接到這類電話，先掛斷、深呼吸，再打 165 確認！"
+        }
+      ]
+    },
+    {
+      id: "friend_borrow",
+      title: "朋友開口借錢救急",
+      desc: "以前認識的朋友突然傳訊：「兄弟／姊妹，我機車被拖吊了，先借我 1,500 元，下週發薪水一定還你！」",
+      choices: [
+        {
+          text: "評估自己的存款，誠實說目前生活費剛好，無法外借",
+          effects: { ccsa: { "財務管理": 15, "關係網絡": 10 } },
+          feedback: "很有智慧的界線設定！照顧好自己的基本生活，並不是自私，而是對自己負責。"
+        },
+        {
+          text: "不好意思拒絕，先借他 1,500 元",
+          effects: { money: -1500, mood: -10, ccsa: { "財務管理": 0 } },
+          feedback: "結果下週對方已讀不回，你的生活費瞬間吃緊... 下次借錢前，記得衡量「就算拿不回來，會不會影響自己吃飯繳房租」喔。"
+        }
+      ]
+    },
+    {
+      id: "ghost_package",
+      title: "超商簡訊：莫名其妙的取貨通知",
+      desc: "手機收到簡訊說你有一個「貨到付款 1,499 元」的包裹到超商了，但你完全不記得最近有買東西。",
+      securityHint: { threshold: 55, text: "🛡️ 資安雷達提示：這是常見的「幽靈包裹」詐騙，寄件人多為不明物流代寄！" },
+      choices: [
+        {
+          text: "先核對自己的網購訂單紀錄，確認沒買就直接拒領",
+          effects: { security: 15, mood: 5, ccsa: { "財務管理": 15, "問題解決": 15 } },
+          feedback: "好險沒領！幽靈包裹專騙記性不好或幫忙代領的人，打開通常只有一包垃圾。沒訂購就直接拒領最安全！"
+        },
+        {
+          text: "可能是之前抽獎抽到的吧？先付錢領回家看看",
+          effects: { money: -1499, mood: -12, ccsa: { "財務管理": 0 } },
+          feedback: "打開一看裡面只有一塊廉價肥皂... 記得喔，沒下單的貨到付款包裹千萬別領，若真的誤領可立刻聯絡物流申請退貨退款。"
+        }
+      ]
+    },
+    {
+      id: "scooter_accident",
+      title: "通勤意外：雨天機車打滑擦撞",
+      desc: "下大雨騎車上班時不小心打滑，人只有輕微擦傷，但需要修車與包紮。",
+      choices: [
+        {
+          text: "冷靜報警拍照留紀錄，並去診所包紮（持有【意外險護盾】可大幅減輕花費）",
+          itemCheck: { item: "accident_insurance", moneyOverride: -300, bonusFeedback: "⛑️ 還好你在金幣市集買了【意外險護盾】！理賠幫你扛下大部分花費，只花了 300 元就平安處理完畢！" },
+          effects: { money: -1800, health: -5, ccsa: { "問題解決": 15, "自理生活": 15 } },
+          feedback: "遇到車禍保持冷靜、報警留紀錄保護雙方權益是正確的！這也提醒我們平常存「緊急備用金」與保險的重要。"
+        },
+        {
+          text: "覺得好麻煩，隨便私下塞錢和解，傷口也不處理",
+          effects: { money: -2500, health: -15, mood: -10, ccsa: { "問題解決": 0 } },
+          feedback: "沒報警私下和解容易遇到後續糾紛，傷口沒消毒也容易發炎喔！遇到意外深呼吸，照程序處理最能保護自己。"
+        }
+      ]
+    },
+    {
+      id: "kind_neighbor",
+      title: "溫暖小確幸：社區的善意",
+      desc: "你在社區巷口幫忙一位阿嬤提重物上樓，阿嬤笑著塞給你兩袋新鮮水果和自製便當！",
+      choices: [
+        {
+          text: "開心道謝收下，順便和阿嬤聊聊天建立好鄰里關係",
+          effects: { health: 15, mood: 15, ccsa: { "關係網絡": 15, "心理能量": 15 } },
+          feedback: "暖暖的一天！自立生活不只有挑戰，還有許多人與人之間的善意。良好的鄰里互動也是很棒的非正式支持網絡喔！"
+        }
+      ]
+    }
+  ]
+};
+
+// ============================================================================
+// 2. 遊戲狀態管理
+// ============================================================================
+let state = {};
+function initGameState() {
+  state = {
+    started: false,
+    soundEnabled: true,
+    age: 17,
+    money: 2000,
+    health: 90,
+    mood: 75,
+    security: 50,
+    combo: 0,
+    maxCombo: 0,
+    workCount: 0,
+    emergencyClaimed: false,
+    bnplDebt: false,
+    items: [],
+    achievements: [],
+    completedMissions: [],
+    seenQuestions: [],
+    litIslands: [],
+    missionsDoneCount: 0,
+    triggeredEvents: [],
+    endingShown: false,
+    ccsa: {
+      "經濟能力": 25, "財務管理": 25, "自理生活": 25,
+      "住所穩定": 25, "就業能力": 25, "學習能力": 25,
+      "關係網絡": 25, "問題解決": 25, "心理能量": 25
+    }
+  };
+}
+initGameState();
+
+let activeIslandId = null;
+let hoveredIslandId = null;
+let activeQuiz = null;
+let breathingTimer = null;
+
+function shuffleArray(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function unlockAchievement(key) {
+  if (!state.achievements.includes(key) && GAME_DATA.achievementsMeta[key]) {
+    state.achievements.push(key);
+    const meta = GAME_DATA.achievementsMeta[key];
+    showToast(`🏅 解鎖成就【${meta.icon} ${meta.name}】！`, 'amber');
+  }
+}
+
+// ============================================================================
+// 3. Three.js 旗艦級微縮沙盤世界建構
+// ============================================================================
+let scene, camera, renderer, controls, dirLight, hemiLight;
+const islandObjects = {};
+const clickableMeshes = [];
+const walkers = [];
+const floatingClouds = [];
+const hotAirBalloons = [];
+const animatedProps = [];
+const connectionArcs = [];
+let waterMesh, waterBaseY = [];
+
+const camTransition = {
+  active: false,
+  targetPos: new THREE.Vector3(),
+  targetLookAt: new THREE.Vector3()
+};
+
+const HEX_RADIUS = 2.75;
+const HEX_GAP = 1.07;
+
+function axialToWorld(q, r) {
+  const size = HEX_RADIUS * HEX_GAP;
+  const x = size * Math.sqrt(3) * (q + r / 2);
+  const z = size * (3 / 2) * r;
+  return new THREE.Vector3(x, 0, z);
+}
+
+function clayMat(color, opts = {}) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: opts.roughness !== undefined ? opts.roughness : 0.78,
+    metalness: opts.metalness !== undefined ? opts.metalness : 0.04,
+    flatShading: opts.flatShading !== undefined ? opts.flatShading : true,
+    emissive: opts.emissive || 0x000000,
+    emissiveIntensity: opts.emissiveIntensity || 0,
+    transparent: opts.transparent || false,
+    opacity: opts.opacity !== undefined ? opts.opacity : 1
+  });
+}
+
+function initThreeScene() {
+  const container = document.getElementById('canvas-container');
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xd6eef2);
+  scene.fog = new THREE.FogExp2(0xd6eef2, 0.0115);
+
+  camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 200);
+  const isPortrait = window.innerHeight > window.innerWidth;
+  camera.position.set(isPortrait ? 18 : 13.5, isPortrait ? 17.5 : 12.5, isPortrait ? 19 : 14.5);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, window.innerWidth < 800 ? 1.5 : 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.08;
+  container.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.rotateSpeed = 0.75;
+  controls.zoomSpeed = 0.85;
+  controls.enablePan = false;
+  controls.minDistance = 7.5;
+  controls.maxDistance = 30;
+  controls.minPolarAngle = 0.35;
+  controls.maxPolarAngle = Math.PI / 2.25;
+  controls.target.set(0, 0.4, 0);
+  controls.addEventListener('start', () => {
+    camTransition.active = false;
+  });
+
+  hemiLight = new THREE.HemisphereLight(0xfff9ee, 0x87c4cf, 0.88);
+  scene.add(hemiLight);
+
+  dirLight = new THREE.DirectionalLight(0xfff0d4, 1.05);
+  dirLight.position.set(16, 26, 14);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 2048;
+  dirLight.shadow.mapSize.height = 2048;
+  dirLight.shadow.camera.near = 4;
+  dirLight.shadow.camera.far = 75;
+  const sd = 20;
+  dirLight.shadow.camera.left = -sd;
+  dirLight.shadow.camera.right = sd;
+  dirLight.shadow.camera.top = sd;
+  dirLight.shadow.camera.bottom = -sd;
+  dirLight.shadow.bias = -0.0005;
+  scene.add(dirLight);
+
+  const rimLight = new THREE.DirectionalLight(0xc2e9fb, 0.32);
+  rimLight.position.set(-14, 10, -14);
+  scene.add(rimLight);
+
+  createDynamicWater();
+  createEnclosingHills();
+  createCloudsAndBalloons();
+  createSatelliteIslets();
+
+  GAME_DATA.islands.forEach((isl) => createHexIsland(isl));
+  createArchedBridges();
+  createConnectionArcs();
+  createYouthWalkers();
+  createLabelsDOM();
+
+  bindInteractionEvents(renderer.domElement);
+  window.addEventListener('resize', onWindowResize);
+}
+
+function createDynamicWater() {
+  const geo = new THREE.PlaneGeometry(110, 110, 44, 44);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) waterBaseY.push(pos.getY(i));
+  waterMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    color: 0x7fd0dd, roughness: 0.24, metalness: 0.08, flatShading: true
+  }));
+  waterMesh.position.y = -0.35;
+  waterMesh.receiveShadow = true;
+  scene.add(waterMesh);
+}
+
+function createEnclosingHills() {
+  const hillGroup = new THREE.Group();
+  const ringCount = 26;
+  const hillPalette = [0x9ec49f, 0x8eb897, 0xb0cf9e, 0x95be9c];
+  for (let i = 0; i < ringCount; i++) {
+    const angle = (i / ringCount) * Math.PI * 2;
+    const dist = 25 + Math.sin(i * 2.3) * 2.5;
+    const radius = 5.2 + (i % 3) * 1.4;
+    const height = 4.2 + Math.abs(Math.sin(i * 1.7)) * 4.8;
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(radius, height, 6),
+      clayMat(hillPalette[i % hillPalette.length], { roughness: 0.9 })
+    );
+    cone.position.set(Math.cos(angle) * dist, height * 0.36 - 1.2, Math.sin(angle) * dist);
+    cone.rotation.y = i * 0.7;
+    cone.receiveShadow = true;
+    hillGroup.add(cone);
+    if (i % 2 === 0) {
+      addPineTree(hillGroup, Math.cos(angle) * (dist - radius * 0.42), 0.3, Math.sin(angle) * (dist - radius * 0.42), 0.85, 0x6ea078);
+    }
+  }
+  scene.add(hillGroup);
+}
+
+function createCloudsAndBalloons() {
+  const cloudMat = clayMat(0xffffff, { roughness: 0.92, transparent: true, opacity: 0.92 });
+  for (let i = 0; i < 10; i++) {
+    const cg = new THREE.Group();
+    const s1 = new THREE.Mesh(new THREE.DodecahedronGeometry(1.15, 0), cloudMat);
+    const s2 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.88, 0), cloudMat);
+    s2.position.set(1.0, -0.15, 0.25);
+    const s3 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.82, 0), cloudMat);
+    s3.position.set(-0.95, -0.2, -0.1);
+    cg.add(s1, s2, s3);
+
+    const angle = (i / 10) * Math.PI * 2;
+    const orbitR = 14 + (i % 3) * 4.5;
+    const baseY = 7.2 + (i % 4) * 1.2;
+    cg.position.set(Math.cos(angle) * orbitR, baseY, Math.sin(angle) * orbitR);
+    scene.add(cg);
+    floatingClouds.push({ mesh: cg, angle, orbitR, baseY, speed: 0.03 + (i % 3) * 0.012 });
+  }
+
+  const balloonSpecs = [
+    { angle: 0.7, r: 12.5, y: 6.2, c1: 0xf4a261, c2: 0xfef3c7 },
+    { angle: 3.9, r: 14.0, y: 7.4, c1: 0xe892a5, c2: 0xe0f2fe }
+  ];
+  balloonSpecs.forEach((sp, idx) => {
+    const bg = new THREE.Group();
+    const bulb = new THREE.Mesh(new THREE.DodecahedronGeometry(0.95, 1), clayMat(sp.c1));
+    bulb.scale.set(1, 1.18, 1); bulb.position.y = 1.2; bulb.castShadow = true;
+    const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 0.75, 0.35, 10), clayMat(sp.c2));
+    stripe.position.y = 1.15;
+    const basket = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.34, 0.42), clayMat(0xb07d50));
+    basket.position.y = -0.25;
+    const ropeMat = clayMat(0x7c5b3e);
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+      const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.7, 4), ropeMat);
+      rope.position.set(Math.cos(a) * 0.16, 0.18, Math.sin(a) * 0.16);
+      bg.add(rope);
+    }
+    bg.add(bulb, stripe, basket);
+    scene.add(bg);
+    hotAirBalloons.push({ mesh: bg, angle: sp.angle, r: sp.r, baseY: sp.y, speed: 0.055 + idx * 0.018 });
+  });
+}
+
+function createSatelliteIslets() {
+  const lhGroup = createMiniIsletBase(9.8, -6.5, 1.55, 0xd8c3a5, 0xa8c69f);
+  const lhBase = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.48, 0.9, 8), clayMat(0xffffff));
+  lhBase.position.y = 0.75; lhBase.castShadow = true;
+  const lhRed = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.33, 0.45, 8), clayMat(0xe05a47));
+  lhRed.position.y = 1.38;
+  const lhTop = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.28, 0.35, 8), clayMat(0xfffbeb));
+  lhTop.position.y = 1.78;
+  const lhLight = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), clayMat(0xfef08a, { emissive: 0xf59e0b, emissiveIntensity: 1.0 }));
+  lhLight.position.y = 2.05;
+  const lhCap = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.35, 8), clayMat(0xe05a47));
+  lhCap.position.y = 2.32;
+  lhGroup.add(lhBase, lhRed, lhTop, lhLight, lhCap);
+  animatedProps.push({ type: 'pulse', mesh: lhLight, base: 1.0 });
+
+  const pierGroup = createMiniIsletBase(-9.6, 5.8, 1.45, 0xdcc7aa, 0x9ec49f);
+  const dock = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.14, 0.62), clayMat(0xb88454));
+  dock.position.set(1.0, 0.26, 0.2); dock.castShadow = true;
+  pierGroup.add(dock);
+  const canoe = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.12, 1.15, 6), clayMat(0xe07a5f));
+  hull.rotation.z = Math.PI / 2; hull.scale.set(1, 1, 0.65);
+  canoe.add(hull);
+  canoe.position.set(1.6, -0.05, 0.95); canoe.rotation.y = 0.45;
+  pierGroup.add(canoe);
+  animatedProps.push({ type: 'bob', mesh: canoe, baseY: -0.05, phase: 1.2 });
+  addPalmTree(pierGroup, -0.35, 0.35, -0.2);
+
+  const beachGroup = createMiniIsletBase(8.8, 7.6, 1.5, 0xf2dfb8, 0xf4e3be);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.1, 6), clayMat(0xffffff));
+  pole.position.set(0.2, 0.85, 0.1); pole.rotation.z = -0.15;
+  const umbrella = new THREE.Mesh(new THREE.ConeGeometry(0.75, 0.32, 8), clayMat(0xf4a261));
+  umbrella.position.set(0.28, 1.38, 0.1); umbrella.rotation.z = -0.15; umbrella.castShadow = true;
+  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.45, 0), clayMat(0x94a3b8));
+  rock.position.set(-0.55, 0.45, -0.3);
+  beachGroup.add(pole, umbrella, rock);
+
+  const palmGroup = createMiniIsletBase(-8.8, -7.2, 1.35, 0xe8d5b5, 0xb8d4a0);
+  addPalmTree(palmGroup, -0.2, 0.32, 0.15);
+  addPalmTree(palmGroup, 0.38, 0.32, -0.25);
+
+  const buoyGroup = createMiniIsletBase(0.6, -10.8, 1.15, 0xcbd5e1, 0x94a3b8);
+  const rock2 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.55, 0), clayMat(0x94a3b8));
+  rock2.position.set(0, 0.45, 0);
+  buoyGroup.add(rock2);
+}
+
+function createMiniIsletBase(x, z, r, sandHex, topHex) {
+  const g = new THREE.Group();
+  g.position.set(x, -0.15, z);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.18, 0.7, 9), clayMat(sandHex));
+  base.receiveShadow = true;
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.88, r * 0.94, 0.22, 9), clayMat(topHex));
+  top.position.y = 0.36; top.receiveShadow = true;
+  g.add(base, top);
+  scene.add(g);
+  return g;
+}
+
+function addPalmTree(parent, x, y, z) {
+  const pg = new THREE.Group();
+  pg.position.set(x, y, z);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 1.15, 6), clayMat(0xb07d50));
+  trunk.position.y = 0.55; trunk.rotation.z = 0.14; trunk.castShadow = true;
+  pg.add(trunk);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.72, 4), clayMat(0x6da876));
+    leaf.position.set(0.08 + Math.cos(a) * 0.32, 1.12, Math.sin(a) * 0.32);
+    leaf.rotation.z = -Math.PI / 2.6; leaf.rotation.y = -a;
+    pg.add(leaf);
+  }
+  parent.add(pg);
+}
+
+function addPineTree(parent, x, y, z, scale = 1, colorHex = 0x73a97e) {
+  const tg = new THREE.Group();
+  tg.position.set(x, y, z); tg.scale.setScalar(scale);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.32, 6), clayMat(0x9c6f44));
+  trunk.position.y = 0.16;
+  const c1 = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.62, 6), clayMat(colorHex));
+  c1.position.y = 0.55; c1.castShadow = true;
+  const c2 = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.48, 6), clayMat(colorHex));
+  c2.position.y = 0.88; c2.castShadow = true;
+  tg.add(trunk, c1, c2);
+  parent.add(tg);
+}
+
+function addRoundTree(parent, x, y, z, colorHex = 0x81b29a, scale = 1) {
+  const tg = new THREE.Group();
+  tg.position.set(x, y, z); tg.scale.setScalar(scale);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.38, 6), clayMat(0x9c6f44));
+  trunk.position.y = 0.19;
+  const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(0.36, 0), clayMat(colorHex));
+  crown.position.y = 0.58; crown.castShadow = true;
+  tg.add(trunk, crown);
+  parent.add(tg);
+}
+
+function createHexIsland(isl) {
+  const pos = axialToWorld(isl.q, isl.r);
+  const group = new THREE.Group();
+  group.position.copy(pos);
+
+  const stoneMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(HEX_RADIUS * 1.03, HEX_RADIUS * 1.12, 0.95, 6),
+    clayMat(0xc5b8a5, { roughness: 0.9 })
+  );
+  stoneMesh.position.y = -0.35; stoneMesh.receiveShadow = true; stoneMesh.castShadow = true;
+  group.add(stoneMesh);
+
+  const bankMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(HEX_RADIUS, HEX_RADIUS * 1.03, 0.34, 6),
+    clayMat(0xdcb98a, { roughness: 0.85 })
+  );
+  bankMesh.position.y = 0.28; bankMesh.receiveShadow = true;
+  group.add(bankMesh);
+
+  const topMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(HEX_RADIUS * 0.94, HEX_RADIUS * 0.95, 0.18, 6),
+    clayMat(isl.groundColor, { roughness: 0.82 })
+  );
+  topMesh.position.y = 0.52; topMesh.receiveShadow = true;
+  topMesh.userData = { islandId: isl.id };
+  group.add(topMesh);
+  clickableMeshes.push(topMesh);
+
+  const rimMesh = new THREE.Mesh(
+    new THREE.RingGeometry(HEX_RADIUS * 0.86, HEX_RADIUS * 0.96, 6),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(isl.color), side: THREE.DoubleSide, transparent: true, opacity: 0.55 })
+  );
+  rimMesh.rotation.x = -Math.PI / 2; rimMesh.rotation.z = Math.PI / 6; rimMesh.position.y = 0.625;
+  group.add(rimMesh);
+
+  const mistMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(HEX_RADIUS * 0.9, HEX_RADIUS * 0.9, 0.12, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.24 })
+  );
+  mistMesh.position.y = 0.64;
+  group.add(mistMesh);
+
+  const propsGroup = buildDetailedIslandScene(isl.id);
+  propsGroup.position.y = 0.61;
+  group.add(propsGroup);
+
+  scene.add(group);
+  islandObjects[isl.id] = { group, topMesh, rimMesh, mistMesh, propsGroup, center: pos, data: isl, baseY: 0, targetY: 0 };
+}
+
+function buildDetailedIslandScene(id) {
+  const g = new THREE.Group();
+  const warmGlow = clayMat(0xfff3b0, { emissive: 0xfbbf24, emissiveIntensity: 0.85, roughness: 0.3 });
+
+  if (id === 'resources') {
+    const hall = new THREE.Mesh(new THREE.BoxGeometry(1.65, 1.05, 1.25), clayMat(0xe9c496));
+    hall.position.set(0, 0.52, -0.25); hall.castShadow = true;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(1.42, 0.72, 4), clayMat(0x528b75));
+    roof.rotation.y = Math.PI / 4; roof.position.set(0, 1.4, -0.25); roof.castShadow = true;
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.55, 0.08), clayMat(0x7f4f24));
+    door.position.set(0, 0.28, 0.38);
+    const winL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.06), warmGlow);
+    winL.position.set(-0.48, 0.55, 0.38);
+    const winR = winL.clone(); winR.position.x = 0.48;
+    g.add(hall, roof, door, winL, winR);
+
+    for (let i = -3; i <= 3; i++) {
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 6), warmGlow);
+      bulb.position.set(i * 0.24, 1.02 - Math.abs(i) * 0.03, 0.44);
+      g.add(bulb);
+    }
+
+    const boardGroup = new THREE.Group();
+    boardGroup.position.set(-1.15, 0, 0.85); boardGroup.rotation.y = 0.4;
+    const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.65, 0.06), clayMat(0x8d5b34)); p1.position.set(-0.28, 0.32, 0);
+    const p2 = p1.clone(); p2.position.x = 0.28;
+    const board = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.42, 0.07), clayMat(0xd4a373)); board.position.set(0, 0.52, 0);
+    const note1 = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.18, 0.02), clayMat(0xfef08a)); note1.position.set(-0.14, 0.54, 0.045);
+    const note2 = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.02), clayMat(0xbae6fd)); note2.position.set(0.14, 0.5, 0.045);
+    boardGroup.add(p1, p2, board, note1, note2);
+    g.add(boardGroup);
+
+    const crate1 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.32, 0.36), clayMat(0xc88d55));
+    crate1.position.set(1.05, 0.16, 0.72); crate1.rotation.y = 0.3; crate1.castShadow = true;
+    const crate2 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.26, 0.28), clayMat(0xb57a42));
+    crate2.position.set(1.25, 0.13, 0.42);
+    g.add(crate1, crate2);
+
+    addRoundTree(g, -1.45, 0, -0.85, 0x74b388, 0.95);
+    addRoundTree(g, 1.4, 0, -0.9, 0x8bc39a, 0.85);
+  }
+  else if (id === 'housing') {
+    const apt1 = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.55, 1.0), clayMat(0xf4d3b3));
+    apt1.position.set(-0.55, 0.78, -0.35); apt1.castShadow = true;
+    const roof1 = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.16, 1.08), clayMat(0xd97a54));
+    roof1.position.set(-0.55, 1.6, -0.35);
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 2; c++) {
+        const w = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.06), warmGlow);
+        w.position.set(-0.8 + c * 0.48, 0.55 + r * 0.52, 0.16);
+        g.add(w);
+      }
+    }
+    const balcony = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.1, 0.25), clayMat(0xfffbeb));
+    balcony.position.set(-0.55, 0.92, 0.24);
+    const pot = new THREE.Mesh(new THREE.DodecahedronGeometry(0.12, 0), clayMat(0x6ab07c));
+    pot.position.set(-0.78, 1.04, 0.26);
+    g.add(apt1, roof1, balcony, pot);
+
+    const apt2 = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.05, 0.9), clayMat(0xf7e3c8));
+    apt2.position.set(0.68, 0.52, -0.15); apt2.castShadow = true;
+    const roof2 = new THREE.Mesh(new THREE.ConeGeometry(0.84, 0.55, 4), clayMat(0xe07a5f));
+    roof2.rotation.y = Math.PI / 4; roof2.position.set(0.68, 1.32, -0.15); roof2.castShadow = true;
+    const w2 = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.06), warmGlow);
+    w2.position.set(0.68, 0.62, 0.31);
+    g.add(apt2, roof2, w2);
+
+    const mbPost = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.42, 6), clayMat(0x475569));
+    mbPost.position.set(0.15, 0.21, 0.85);
+    const mbBox = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.22, 0.15), clayMat(0xe63946));
+    mbBox.position.set(0.15, 0.46, 0.85);
+    g.add(mbPost, mbBox);
+
+    const box1 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.24, 0.26), clayMat(0xd4a373));
+    box1.position.set(0.75, 0.12, 0.65);
+    const box2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.2, 0.22), clayMat(0xc89666));
+    box2.position.set(0.78, 0.34, 0.64); box2.rotation.y = 0.35;
+    g.add(box1, box2);
+
+    addStreetLamp(g, -1.2, 0, 0.85, warmGlow);
+    addRoundTree(g, 1.45, 0, -0.8, 0x81b29a, 0.85);
+  }
+  else if (id === 'career') {
+    const cafe = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.05, 1.05), clayMat(0xc86d5c));
+    cafe.position.set(-0.25, 0.52, -0.35); cafe.castShadow = true;
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.16, 0.42), clayMat(0xfffbeb));
+    awning.position.set(-0.25, 0.88, 0.28); awning.rotation.x = 0.28;
+    const cafeWin = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.38, 0.06), warmGlow);
+    cafeWin.position.set(-0.25, 0.48, 0.18);
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.32, 0.12), clayMat(0x3d405b));
+    sign.position.set(-0.25, 1.24, 0.05);
+    const signDot = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), warmGlow);
+    signDot.position.set(-0.25, 1.24, 0.12);
+    g.add(cafe, awning, cafeWin, sign, signDot);
+
+    const table = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.08, 0.28, 8), clayMat(0xfef3c7));
+    table.position.set(-1.05, 0.14, 0.72);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.95, 6), clayMat(0x64748b));
+    pole.position.set(-1.05, 0.48, 0.72);
+    const para = new THREE.Mesh(new THREE.ConeGeometry(0.58, 0.24, 8), clayMat(0x5ea3c4));
+    para.position.set(-1.05, 0.96, 0.72); para.castShadow = true;
+    g.add(table, pole, para);
+
+    const truck = new THREE.Group();
+    truck.position.set(1.0, 0, 0.55); truck.rotation.y = -0.5;
+    const tBody = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.56, 0.52), clayMat(0xf2cc8f));
+    tBody.position.y = 0.36; tBody.castShadow = true;
+    const tWin = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.24, 0.54), warmGlow);
+    tWin.position.set(0.08, 0.44, 0);
+    const wheelMat = clayMat(0x334155);
+    [-0.28, 0.28].forEach(wx => {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.56, 8), wheelMat);
+      w.rotation.x = Math.PI / 2; w.position.set(wx, 0.11, 0);
+      truck.add(w);
+    });
+    truck.add(tBody, tWin);
+    g.add(truck);
+
+    const toolbox = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.18), clayMat(0xe05a47));
+    toolbox.position.set(0.25, 0.09, 0.95);
+    g.add(toolbox);
+    addRoundTree(g, 1.3, 0, -0.85, 0x81b29a, 0.8);
+  }
+  else if (id === 'finance') {
+    const bank = new THREE.Mesh(new THREE.CylinderGeometry(0.82, 0.92, 1.05, 8), clayMat(0xf5e6cc));
+    bank.position.set(0, 0.52, -0.25); bank.castShadow = true;
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.8, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), clayMat(0x528b75));
+    dome.position.set(0, 1.05, -0.25); dome.castShadow = true;
+    const coin = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.36, 0.36, 0.1, 12),
+      clayMat(0xfacc15, { emissive: 0xd97706, emissiveIntensity: 0.45, roughness: 0.35 })
+    );
+    coin.rotation.x = Math.PI / 2; coin.position.set(0, 2.25, -0.25); coin.castShadow = true;
+    animatedProps.push({ type: 'spinY', mesh: coin, speed: 1.5 });
+    g.add(bank, dome, coin);
+
+    const atm = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.62, 0.28), clayMat(0x475569));
+    atm.position.set(1.15, 0.31, 0.38); atm.rotation.y = -0.45;
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.04), clayMat(0x7dd3fc, { emissive: 0x38bdf8, emissiveIntensity: 0.6 }));
+    screen.position.set(0, 0.12, 0.13);
+    atm.add(screen);
+    g.add(atm);
+
+    const stall = new THREE.Group();
+    stall.position.set(-1.05, 0, 0.72); stall.rotation.y = 0.45;
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.38, 0.42), clayMat(0xd4a373)); counter.position.y = 0.19;
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.14, 0.52), clayMat(0xe07a5f)); canopy.position.y = 0.82; canopy.castShadow = true;
+    [-0.36, 0.36].forEach(px => {
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.8, 5), clayMat(0x8d5b34));
+      p.position.set(px, 0.4, 0);
+      stall.add(p);
+    });
+    stall.add(counter, canopy);
+    g.add(stall);
+    addRoundTree(g, -1.35, 0, -0.85, 0x95c9a7, 0.82);
+  }
+  else if (id === 'wellness') {
+    const pavBase = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.96, 0.18, 6), clayMat(0xdcb98a));
+    pavBase.position.set(-0.35, 0.09, -0.35);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.88, 6), clayMat(0x8d5b34));
+      pil.position.set(-0.35 + Math.cos(a) * 0.62, 0.55, -0.35 + Math.sin(a) * 0.62);
+      g.add(pil);
+    }
+    const pavRoof = new THREE.Mesh(new THREE.ConeGeometry(1.15, 0.6, 6), clayMat(0xe08e79));
+    pavRoof.position.set(-0.35, 1.24, -0.35); pavRoof.castShadow = true;
+    g.add(pavBase, pavRoof);
+
+    addRoundTree(g, 1.15, 0, -0.65, 0xf7b2c4, 1.15);
+    addRoundTree(g, -1.35, 0, 0.45, 0xfbcfe8, 0.92);
+    addRoundTree(g, 0.45, 0, -1.35, 0xfde047, 0.8);
+
+    const fireGroup = new THREE.Group();
+    fireGroup.position.set(0.85, 0, 0.58);
+    const log1 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.42, 6), clayMat(0x7c4a2d));
+    log1.rotation.z = Math.PI / 2; log1.position.y = 0.05;
+    const log2 = log1.clone(); log2.rotation.y = Math.PI / 2;
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.36, 5), clayMat(0xfb923c, { emissive: 0xf97316, emissiveIntensity: 0.9 }));
+    flame.position.y = 0.22;
+    animatedProps.push({ type: 'flicker', mesh: flame });
+    fireGroup.add(log1, log2, flame);
+    g.add(fireGroup);
+
+    const mat = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.03, 0.55), clayMat(0xfef3c7));
+    mat.position.set(-0.35, 0.02, 0.92); mat.rotation.y = 0.2;
+    g.add(mat);
+
+    const poolRim = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.1, 6, 12), clayMat(0xcbd5e1));
+    poolRim.rotation.x = Math.PI / 2; poolRim.position.set(0.65, 0.08, -0.15);
+    const poolWater = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.06, 12), clayMat(0x7dd3fc, { emissive: 0x38bdf8, emissiveIntensity: 0.55 }));
+    poolWater.position.set(0.65, 0.06, -0.15);
+    g.add(poolRim, poolWater);
+  }
+  else if (id === 'cyber') {
+    const stage = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.15, 0.24, 8), clayMat(0xe2e8f0));
+    stage.position.set(-0.1, 0.12, -0.2); stage.receiveShadow = true;
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(0.92, 0.08, 6, 16, Math.PI), clayMat(0x6366f1));
+    arch.position.set(-0.1, 0.24, -0.55);
+    g.add(stage, arch);
+
+    const exGroup = new THREE.Group();
+    exGroup.position.set(-0.1, 0.95, -0.2);
+    const exBar = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.07, 0.65, 6), clayMat(0xfef08a, { emissive: 0xf59e0b, emissiveIntensity: 0.75 }));
+    exBar.position.y = 0.22;
+    const exDot = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), clayMat(0xfef08a, { emissive: 0xf59e0b, emissiveIntensity: 0.75 }));
+    exDot.position.y = -0.26;
+    exGroup.add(exBar, exDot);
+    animatedProps.push({ type: 'bobSpin', mesh: exGroup, baseY: 0.95 });
+    g.add(exGroup);
+
+    const shieldBase = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.26, 6), clayMat(0x94a3b8));
+    shieldBase.position.set(1.15, 0.13, 0.35);
+    const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.12, 0.62, 5), clayMat(0x818cf8, { emissive: 0x4f46e5, emissiveIntensity: 0.25 }));
+    shield.position.set(1.15, 0.58, 0.35); shield.scale.set(1, 1, 0.35); shield.rotation.y = -0.5; shield.castShadow = true;
+    g.add(shieldBase, shield);
+
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.95, 6), clayMat(0x8d5b34));
+    post.position.set(-1.15, 0.48, 0.65);
+    const dir1 = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.14, 0.05), clayMat(0xfef3c7));
+    dir1.position.set(-1.15, 0.8, 0.65); dir1.rotation.y = 0.4;
+    const dir2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.14, 0.05), clayMat(0xbae6fd));
+    dir2.position.set(-1.15, 0.62, 0.65); dir2.rotation.y = -0.7;
+    g.add(post, dir1, dir2);
+
+    const med = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.26, 0.24), clayMat(0xffffff));
+    med.position.set(0.35, 0.13, 0.92);
+    const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.26), clayMat(0xef4444));
+    const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.26), clayMat(0xef4444));
+    med.add(c1, c2);
+    g.add(med);
+  }
+
+  g.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.userData.islandId = id;
+      clickableMeshes.push(obj);
+    }
+  });
+  return g;
+}
+
+function addStreetLamp(parent, x, y, z, glowMat) {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 1.05, 6), clayMat(0x475569));
+  pole.position.set(x, y + 0.52, z);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), glowMat);
+  lamp.position.set(x, y + 1.08, z);
+  parent.add(pole, lamp);
+}
+
+function createArchedBridges() {
+  const woodMat = clayMat(0xc89666);
+  const railMat = clayMat(0x9c6f44);
+  const list = GAME_DATA.islands;
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j];
+      const dq = a.q - b.q, dr = a.r - b.r;
+      if ((Math.abs(dq) + Math.abs(dq + dr) + Math.abs(dr)) / 2 === 1) {
+        const pA = axialToWorld(a.q, a.r);
+        const pB = axialToWorld(b.q, b.r);
+        const mid = pA.clone().add(pB).multiplyScalar(0.5);
+        const bg = new THREE.Group();
+        bg.position.set(mid.x, 0.52, mid.z);
+        bg.lookAt(pB.x, 0.52, pB.z);
+        for (let k = -2; k <= 2; k++) {
+          const plank = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.08, 0.24), woodMat);
+          plank.position.set(0, 0.14 - Math.abs(k) * 0.04, k * 0.27);
+          plank.castShadow = true; plank.receiveShadow = true;
+          bg.add(plank);
+        }
+        [-0.34, 0.34].forEach(rx => {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 1.3), railMat);
+          rail.position.set(rx, 0.18, 0);
+          bg.add(rail);
+        });
+        scene.add(bg);
+      }
+    }
+  }
+}
+
+function createConnectionArcs() {
+  const seen = new Set();
+  GAME_DATA.islands.forEach((isl) => {
+    (isl.connectedTo || []).forEach((targetId) => {
+      const key = [isl.id, targetId].sort().join('-');
+      if (seen.has(key) || !islandObjects[targetId]) return;
+      seen.add(key);
+      const p1 = islandObjects[isl.id].center.clone().setY(1.3);
+      const p2 = islandObjects[targetId].center.clone().setY(1.3);
+      const mid = p1.clone().add(p2).multiplyScalar(0.5); mid.y = 3.4;
+      const mesh = new THREE.Mesh(
+        new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(p1, mid, p2), 24, 0.045, 8, false),
+        clayMat(0xfef08a, { emissive: 0xf59e0b, emissiveIntensity: 0.75, transparent: true, opacity: 0.85 })
+      );
+      mesh.visible = false;
+      scene.add(mesh);
+      connectionArcs.push({ from: isl.id, to: targetId, mesh });
+    });
+  });
+}
+
+function createYouthWalkers() {
+  const hoodieColors = [0xf4a261, 0x60a5fa, 0xf472b6, 0x34d399, 0xa78bfa];
+  const bagColors = [0x3d405b, 0xe07a5f, 0x475569, 0xd97706, 0x0f766e];
+  const paths = [
+    { from: axialToWorld(0, 0), to: axialToWorld(1, -1), offset: 0.1 },
+    { from: axialToWorld(0, 0), to: axialToWorld(1, 0), offset: 0.45 },
+    { from: axialToWorld(0, 0), to: axialToWorld(0, 1), offset: 0.7 },
+    { from: axialToWorld(0, 0), to: axialToWorld(-1, 1), offset: 0.25 },
+    { from: axialToWorld(0, 0), to: axialToWorld(-1, 0), offset: 0.85 }
+  ];
+  paths.forEach((p, idx) => {
+    const yg = new THREE.Group();
+    const legMat = clayMat(0x334155);
+    const l1 = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.14, 0.07), legMat); l1.position.set(-0.05, 0.07, 0);
+    const l2 = l1.clone(); l2.position.x = 0.05;
+    const hoodie = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 0.28, 7), clayMat(hoodieColors[idx]));
+    hoodie.position.y = 0.26; hoodie.castShadow = true;
+    const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.2, 0.1), clayMat(bagColors[idx]));
+    backpack.position.set(0, 0.27, -0.14);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), clayMat(0xffe5d9)); head.position.y = 0.48;
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.135, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), clayMat(hoodieColors[idx]));
+    cap.position.y = 0.5;
+    yg.add(l1, l2, hoodie, backpack, head, cap);
+    scene.add(yg);
+    walkers.push({
+      mesh: yg, from: p.from.clone().lerp(p.to, 0.28), to: p.from.clone().lerp(p.to, 0.72),
+      t: p.offset, dir: 1, speed: 0.14 + (idx % 3) * 0.03
+    });
+  });
+}
+
+function createLabelsDOM() {
+  const layer = document.getElementById('labels-layer');
+  layer.innerHTML = '';
+  GAME_DATA.islands.forEach((isl) => {
+    const el = document.createElement('div');
+    el.id = `label-${isl.id}`;
+    el.className = 'island-label';
+    el.innerHTML = `
+      <div class="label-pill flex items-center gap-1.5 bg-white/88 backdrop-blur-md px-3 py-1 rounded-full shadow-md border border-white/90 text-xs font-bold text-slate-700 whitespace-nowrap transition-all">
+        <span class="w-5 h-5 rounded-full text-[11px] text-white flex items-center justify-center font-black shadow-sm" style="background:${isl.color}">${isl.badge}</span>
+        <span>${isl.shortName}</span>
+        <span id="label-check-${isl.id}" class="hidden text-emerald-500 font-black">✦</span>
+      </div>
+    `;
+    el.addEventListener('mouseenter', () => setHoveredIsland(isl.id));
+    el.addEventListener('mouseleave', () => setHoveredIsland(null));
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectIslandById(isl.id);
+    });
+    layer.appendChild(el);
+  });
+}
+
+// ============================================================================
+// 4. 懸停與點擊偵測
+// ============================================================================
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+let downPos = { x: 0, y: 0 };
+
+function bindInteractionEvents(dom) {
+  dom.addEventListener('pointerdown', (e) => { downPos = { x: e.clientX, y: e.clientY }; });
+  dom.addEventListener('pointermove', (e) => {
+    if (!state.started || e.pointerType === 'touch') return;
+    pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+    pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointerNDC, camera);
+    const hits = raycaster.intersectObjects(clickableMeshes, false);
+    const hitId = hits.length > 0 ? hits[0].object.userData.islandId : null;
+    setHoveredIsland(hitId);
+    dom.style.cursor = hitId ? 'pointer' : 'grab';
+  });
+  dom.addEventListener('pointerup', (e) => {
+    if (!state.started) return;
+    if (Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 6) {
+      pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+      pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(pointerNDC, camera);
+      const hits = raycaster.intersectObjects(clickableMeshes, false);
+      if (hits.length > 0 && hits[0].object.userData.islandId) {
+        selectIslandById(hits[0].object.userData.islandId);
+      }
+    }
+  });
+}
+
+function setHoveredIsland(id) {
+  if (hoveredIslandId === id) return;
+  if (hoveredIslandId) {
+    const prevEl = document.getElementById(`label-${hoveredIslandId}`);
+    if (prevEl) prevEl.classList.remove('hovered');
+  }
+  hoveredIslandId = id;
+  if (id) {
+    const el = document.getElementById(`label-${id}`);
+    if (el) el.classList.add('hovered');
+  }
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// ============================================================================
+// 5. 動畫主循環
+// ============================================================================
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.getElapsedTime();
+
+  if (camTransition.active) {
+    camera.position.lerp(camTransition.targetPos, 0.075);
+    controls.target.lerp(camTransition.targetLookAt, 0.085);
+    if (camera.position.distanceTo(camTransition.targetPos) < 0.06 &&
+        controls.target.distanceTo(camTransition.targetLookAt) < 0.06) {
+      camTransition.active = false;
+    }
+  }
+  controls.update();
+
+  if (waterMesh) {
+    const pos = waterMesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      pos.setY(i, waterBaseY[i] + Math.sin(x * 0.25 + t * 1.4) * 0.09 + Math.cos(z * 0.22 + t * 1.1) * 0.09);
+    }
+    pos.needsUpdate = true;
+  }
+
+  Object.entries(islandObjects).forEach(([id, obj]) => {
+    const isSel = id === activeIslandId;
+    const isHov = id === hoveredIslandId;
+    const isLit = state.litIslands.includes(id);
+    const goalY = isHov ? 0.28 : (isSel ? 0.14 : 0);
+    obj.group.position.y += (goalY - obj.group.position.y) * 0.12;
+    obj.rimMesh.material.opacity = (isHov || isSel) ? 0.95 : (isLit ? 0.72 : 0.35);
+  });
+
+  floatingClouds.forEach((c) => {
+    c.angle += c.speed * dt;
+    c.mesh.position.set(Math.cos(c.angle) * c.orbitR, c.baseY + Math.sin(t * 0.9 + c.angle) * 0.25, Math.sin(c.angle) * c.orbitR);
+    c.mesh.rotation.y += dt * 0.06;
+  });
+
+  hotAirBalloons.forEach((b) => {
+    b.angle += b.speed * dt;
+    b.mesh.position.set(Math.cos(b.angle) * b.r, b.baseY + Math.sin(t * 1.1 + b.angle) * 0.42, Math.sin(b.angle) * b.r);
+    b.mesh.rotation.y = -b.angle;
+  });
+
+  animatedProps.forEach((p) => {
+    if (p.type === 'spinY') p.mesh.rotation.z += dt * p.speed;
+    else if (p.type === 'flicker') {
+      const s = 0.9 + Math.sin(t * 11) * 0.14;
+      p.mesh.scale.set(s, 0.9 + Math.cos(t * 13) * 0.18, s);
+    } else if (p.type === 'bob') {
+      p.mesh.position.y = p.baseY + Math.sin(t * 2.2 + p.phase) * 0.05;
+      p.mesh.rotation.z = Math.sin(t * 1.8 + p.phase) * 0.06;
+    } else if (p.type === 'bobSpin') {
+      p.mesh.position.y = p.baseY + Math.sin(t * 2.6) * 0.1;
+      p.mesh.rotation.y += dt * 1.4;
+    } else if (p.type === 'pulse') {
+      p.mesh.material.emissiveIntensity = 0.7 + Math.sin(t * 3.2) * 0.45;
+    }
+  });
+
+  walkers.forEach((w) => {
+    w.t += w.speed * dt * w.dir;
+    if (w.t >= 1) { w.t = 1; w.dir = -1; }
+    else if (w.t <= 0) { w.t = 0; w.dir = 1; }
+    const pos = w.from.clone().lerp(w.to, w.t);
+    const bounce = Math.abs(Math.sin(t * 7.5 + w.speed * 10)) * 0.07;
+    w.mesh.position.set(pos.x, 0.65 + bounce, pos.z);
+    const lookTarget = w.dir > 0 ? w.to : w.from;
+    w.mesh.lookAt(lookTarget.x, 0.65 + bounce, lookTarget.z);
+  });
+
+  const isGloomy = state.mood < 40;
+  const targetBg = new THREE.Color(isGloomy ? 0x9eb2c2 : 0xd6eef2);
+  scene.background.lerp(targetBg, 0.03);
+  scene.fog.color.lerp(targetBg, 0.03);
+  scene.fog.density += ((isGloomy ? 0.026 : 0.0115) - scene.fog.density) * 0.04;
+  dirLight.intensity += ((isGloomy ? 0.65 : 1.05) - dirLight.intensity) * 0.04;
+
+  renderer.render(scene, camera);
+  updateLabelsPosition();
+}
+
+function updateLabelsPosition() {
+  const halfW = window.innerWidth / 2;
+  const halfH = window.innerHeight / 2;
+  GAME_DATA.islands.forEach((isl) => {
+    const el = document.getElementById(`label-${isl.id}`);
+    if (!el) return;
+    const obj = islandObjects[isl.id];
+    const worldPos = obj.center.clone().add(new THREE.Vector3(0, 2.55 + obj.group.position.y, 0));
+    worldPos.project(camera);
+    if (worldPos.z > 1) el.style.display = 'none';
+    else {
+      el.style.display = 'block';
+      el.style.left = `${(worldPos.x * halfW) + halfW}px`;
+      el.style.top = `${-(worldPos.y * halfH) + halfH}px`;
+    }
+  });
+}
+
+// ============================================================================
+// 6. 開局引導流程
+// ============================================================================
+function spinOriginWheel() {
+  playTone('click');
+  const btn = document.getElementById('btn-spin');
+  btn.disabled = true;
+  btn.textContent = '🎲 抽籤中...';
+
+  const ages = [15, 16, 17, 18, 19];
+  const monies = [0, 2000, 4000, 6000, 8000];
+  let ticks = 0;
+
+  const timer = setInterval(() => {
+    const a = ages[Math.floor(Math.random() * ages.length)];
+    const m = monies[Math.floor(Math.random() * monies.length)];
+    document.getElementById('draw-age').textContent = `${a} 歲`;
+    document.getElementById('draw-money').textContent = `$ ${m.toLocaleString()}`;
+    ticks++;
+    if (ticks > 14) {
+      clearInterval(timer);
+      playTone('correct');
+      state.age = a;
+      state.money = m;
+      const noteEl = document.getElementById('draw-note');
+      noteEl.classList.remove('hidden');
+      if (a < 18) {
+        noteEl.textContent = `你抽到了未滿 18 歲的身分！一般租屋可能會遇阻，但別擔心，中央「啟・領航廣場」有社工可以陪你喔！`;
+      } else if (m <= 2000) {
+        noteEl.textContent = `起跑點存款比較緊，先去「啟・領航廣場」申請急難救助，或去「職・夢想工坊」打工賺錢吧！`;
+      } else {
+        noteEl.textContent = `很棒的起跑點！自由旋轉沙盤，點擊六座小島展開隨機抽題冒險吧！`;
+      }
+      btn.classList.add('hidden');
+      document.getElementById('btn-to-step2').classList.remove('hidden');
+    }
+  }, 65);
+}
+
+function goToOnboardingStep2() {
+  playTone('click');
+  document.getElementById('ob-step-1').classList.add('hidden');
+  document.getElementById('ob-step-2').classList.remove('hidden');
+}
+
+function quickExploreMode() {
+  state.age = 17; state.money = 4000; state.security = 60;
+  playTone('lightup');
+  enterIslandWorld();
+}
+
+function finishOnboarding(type) {
+  if (type === 'strong') {
+    state.security = 75;
+    state.ccsa['問題解決'] += 10;
+    playTone('correct');
+    showToast('🛡️ 開啟雙重驗證！初始資安防禦值提升至 75', 'emerald');
+  } else {
+    state.security = 35;
+    playTone('gentle');
+    showToast('⚠️ 簡單密碼容易被猜中，記得去「戰・生活試煉場」升級防禦喔！', 'amber');
+  }
+  enterIslandWorld();
+}
+
+function enterIslandWorld() {
+  state.started = true;
+  document.getElementById('onboarding-modal').classList.add('hidden');
+  document.getElementById('hud').classList.remove('hidden');
+  const bc = document.getElementById('bottom-controls');
+  bc.classList.remove('hidden');
+  bc.classList.add('flex');
+  updateHUD();
+  resetCameraOverview();
+}
+
+// ============================================================================
+// 7. 島嶼互動、隨機抽題系統、打工與生活小舖
+// ============================================================================
+function selectIslandById(id) {
+  const obj = islandObjects[id];
+  if (!obj) return;
+  playTone('click');
+  activeIslandId = id;
+  activeQuiz = null;
+  clearInterval(breathingTimer);
+
+  const isMobile = window.innerWidth < 640;
+  const focusCenter = obj.center.clone().add(new THREE.Vector3(0, isMobile ? -0.4 : 0.5, 0));
+  const offset = new THREE.Vector3(isMobile ? 6.8 : 6.2, isMobile ? 6.8 : 5.6, isMobile ? 7.4 : 6.8);
+  camTransition.targetLookAt.copy(focusCenter);
+  camTransition.targetPos.copy(focusCenter).add(offset);
+  camTransition.active = true;
+
+  renderIslandPanel(obj.data);
+  document.getElementById('island-panel').classList.remove('translate-y-[115%]');
+}
+
+function closeIslandPanel() {
+  activeIslandId = null;
+  clearInterval(breathingTimer);
+  document.getElementById('island-panel').classList.add('translate-y-[115%]');
+}
+
+function resetCameraOverview() {
+  playTone('click');
+  closeIslandPanel();
+  const isPortrait = window.innerHeight > window.innerWidth;
+  camTransition.targetLookAt.set(0, 0.4, 0);
+  camTransition.targetPos.set(isPortrait ? 18 : 13.5, isPortrait ? 17.5 : 12.5, isPortrait ? 19 : 14.5);
+  camTransition.active = true;
+}
+
+function renderIslandPanel(isl) {
+  const isLit = state.litIslands.includes(isl.id);
+  const badge = document.getElementById('panel-badge');
+  badge.textContent = isl.badge;
+  badge.style.background = isl.color;
+  document.getElementById('panel-title').textContent = isl.name;
+  document.getElementById('panel-summary').textContent = isl.summary;
+
+  const statusEl = document.getElementById('panel-status');
+  if (isLit) {
+    statusEl.textContent = '✨ 已點亮';
+    statusEl.className = 'text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700';
+  } else {
+    statusEl.textContent = '🧭 待探索';
+    statusEl.className = 'text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500';
+  }
+
+  const body = document.getElementById('panel-body');
+  body.innerHTML = '';
+
+  if (isl.id === 'wellness') {
+    const breathCard = document.createElement('div');
+    breathCard.className = 'p-4 rounded-2xl bg-gradient-to-br from-rose-50 to-amber-50 border border-rose-100 text-center space-y-2.5';
+    breathCard.innerHTML = `
+      <div class="text-sm font-black text-rose-700">🌸 5 秒深呼吸平靜練習</div>
+      <p class="text-xs text-slate-600">在櫻花涼亭旁跟著圓圈慢慢吸氣、吐氣，恢復心情值並驅散霧氣。</p>
+      <div id="breath-visual" class="hidden py-2 flex flex-col items-center gap-2">
+        <div id="breath-circle" class="w-20 h-20 rounded-full bg-rose-200/70 border-4 border-rose-400 flex items-center justify-center text-xs font-black text-rose-900">吸氣</div>
+        <div id="breath-text" class="text-xs font-bold text-rose-700">慢慢深吸一口氣...</div>
+      </div>
+      <button id="btn-start-breath" onclick="startBreathingExercise()" class="clay-btn w-full py-2.5 rounded-xl bg-rose-400 hover:bg-rose-500 text-white font-bold text-sm">
+        開始 5 秒深呼吸（心情 +20）
+      </button>
+    `;
+    body.appendChild(breathCard);
+  }
+
+  if (isl.id === 'resources') {
+    const reliefCard = document.createElement('div');
+    reliefCard.className = 'p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 flex items-center justify-between gap-2';
+    const canClaim = state.money < 2000 && !state.emergencyClaimed;
+    reliefCard.innerHTML = `
+      <div>
+        <div class="text-xs sm:text-sm font-black text-emerald-800">🆘 社福急難救助金</div>
+        <div class="text-[11px] text-slate-600">${state.emergencyClaimed ? '本局已申請過急難救助金' : '存款低於 $2,000 時可免費申請 $2,000 救急'}</div>
+      </div>
+      <button onclick="claimEmergencyRelief()" ${canClaim ? '' : 'disabled'} class="clay-btn px-3 py-2 rounded-xl text-xs font-bold shrink-0 ${canClaim ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}">
+        ${state.emergencyClaimed ? '已領取' : '申請 $2,000'}
+      </button>
+    `;
+    body.appendChild(reliefCard);
+  }
+
+  if (isl.id === 'career') {
+    const workCard = document.createElement('div');
+    workCard.className = 'p-3.5 rounded-2xl bg-orange-50/80 border border-orange-200 space-y-2';
+    workCard.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="text-xs sm:text-sm font-black text-orange-800">☕ 快速打工賺生活費</div>
+        <span class="text-[11px] font-bold text-orange-600">已打工 ${state.workCount} 次</span>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <button onclick="doQuickJob('cafe')" class="clay-btn p-2.5 rounded-xl bg-white hover:bg-orange-100/60 border border-orange-200 text-left">
+          <div class="text-xs font-black text-slate-800">咖啡廳外場</div>
+          <div class="text-[11px] text-emerald-600 font-bold">+$1,200 / ❤️-15</div>
+        </button>
+        <button onclick="doQuickJob('heavy')" class="clay-btn p-2.5 rounded-xl bg-white hover:bg-orange-100/60 border border-orange-200 text-left">
+          <div class="text-xs font-black text-slate-800">工地搬運 (18+)</div>
+          <div class="text-[11px] text-emerald-600 font-bold">+$2,200 / ❤️-30</div>
+        </button>
+      </div>
+    `;
+    body.appendChild(workCard);
+  }
+
+  if (isl.id === 'finance') {
+    const shopCard = document.createElement('div');
+    shopCard.className = 'p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200 space-y-2';
+    const hasAcc = state.items.includes('accident_insurance');
+    const hasFund = state.items.includes('emergency_fund');
+    shopCard.innerHTML = `
+      <div class="text-xs sm:text-sm font-black text-amber-800">🛍️ 金幣市集生活補給小舖</div>
+      <div class="grid grid-cols-2 gap-2">
+        <button onclick="buyShopItem('meal')" class="clay-btn p-2.5 rounded-xl bg-white hover:bg-amber-100/60 border border-amber-200 text-left">
+          <div class="text-xs font-black text-slate-800">🍱 營養便當</div>
+          <div class="text-[11px] text-slate-500">$200｜❤️+25 🌤️+8</div>
+        </button>
+        <button onclick="buyShopItem('accident')" ${hasAcc ? 'disabled' : ''} class="clay-btn p-2.5 rounded-xl border text-left ${hasAcc ? 'bg-slate-100 border-slate-200 opacity-60' : 'bg-white hover:bg-amber-100/60 border-amber-200'}">
+          <div class="text-xs font-black text-slate-800">⛑️ 意外險護盾</div>
+          <div class="text-[11px] text-slate-500">${hasAcc ? '已擁有' : '$600｜降低車禍損失'}</div>
+        </button>
+        <button onclick="buyShopItem('fund')" ${hasFund ? 'disabled' : ''} class="clay-btn p-2.5 rounded-xl border text-left ${hasFund ? 'bg-slate-100 border-slate-200 opacity-60' : 'bg-white hover:bg-amber-100/60 border-amber-200'}">
+          <div class="text-xs font-black text-slate-800">🏦 存緊急備用金</div>
+          <div class="text-[11px] text-slate-500">${hasFund ? '已建立' : '$1,500｜財管大加分'}</div>
+        </button>
+        <button onclick="buyShopItem('bnpl')" ${state.bnplDebt ? 'disabled' : ''} class="clay-btn p-2.5 rounded-xl border text-left ${state.bnplDebt ? 'bg-slate-100 border-slate-200 opacity-60' : 'bg-rose-50 hover:bg-rose-100/60 border-rose-200'}">
+          <div class="text-xs font-black text-rose-700">👟 限量球鞋 (BNPL)</div>
+          <div class="text-[11px] text-rose-500">${state.bnplDebt ? '已被扣款中' : '0元帶走｜🌤️+15 ⚠️'}</div>
+        </button>
+      </div>
+    `;
+    body.appendChild(shopCard);
+  }
+
+  isl.missions.forEach((m) => {
+    const done = state.completedMissions.includes(m.id);
+    const lockedByAge = m.reqAgeOrItem && state.age < m.reqAgeOrItem.minAge && !state.items.includes(m.reqAgeOrItem.altItem);
+    const poolCount = m.questions.length;
+
+    const card = document.createElement('div');
+    card.className = `p-4 rounded-2xl border-2 transition ${done ? 'bg-emerald-50/70 border-emerald-200' : 'bg-white/85 border-slate-100'}`;
+
+    let actionHTML = '';
+    if (lockedByAge) {
+      actionHTML = `
+        <div class="mt-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 space-y-2">
+          <div>🔒 你目前 <b>${state.age} 歲</b>，一般房東需要家長同意書或社工陪同才能簽約。</div>
+          <button onclick="selectIslandById('resources')" class="clay-btn px-3 py-1.5 rounded-lg bg-emerald-500 text-white font-bold">飛去「啟・領航廣場」拿社工陪同卡 →</button>
+        </div>
+      `;
+    } else if (done) {
+      actionHTML = `
+        <div class="mt-2.5 flex items-center justify-between gap-2">
+          <span class="text-xs font-bold text-emerald-600 bg-emerald-100 px-2.5 py-1 rounded-xl">✅ 已通關</span>
+          <button onclick="startMission('${isl.id}', '${m.id}')" class="clay-btn px-3 py-1.5 rounded-xl bg-white hover:bg-sky-50 border border-sky-200 text-sky-600 font-bold text-xs">
+            🎲 再抽新題練習 (題庫 ${poolCount} 題)
+          </button>
+        </div>
+      `;
+    } else {
+      actionHTML = `
+        <button onclick="startMission('${isl.id}', '${m.id}')" class="clay-btn mt-2.5 w-full py-2.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm">
+          🎲 隨機抽題挑戰 (題庫共 ${poolCount} 題)
+        </button>
+      `;
+    }
+
+    card.innerHTML = `
+      <div class="font-black text-slate-800 text-sm sm:text-base">${m.title}</div>
+      <div class="text-xs text-slate-500 mt-0.5">${m.requirement}</div>
+      ${actionHTML}
+    `;
+    body.appendChild(card);
+  });
+}
+
+function claimEmergencyRelief() {
+  if (state.money >= 2000 || state.emergencyClaimed) return;
+  state.emergencyClaimed = true;
+  playTone('coin');
+  applyEffects({ money: 2000, mood: 10, ccsa: { "關係網絡": 15, "問題解決": 10 } });
+  unlockAchievement('resource_seeker');
+  showToast('🆘 成功申請社福急難救助金 +$2,000！', 'emerald');
+  renderIslandPanel(GAME_DATA.islands.find(i => i.id === 'resources'));
+}
+
+function doQuickJob(type) {
+  if (type === 'heavy' && state.age < 18) {
+    playTone('gentle');
+    showToast('⚠️ 依勞基法保護，未滿 18 歲不得從事工地危險搬運喔！先試試咖啡廳外場吧。', 'amber');
+    return;
+  }
+  const costH = type === 'heavy' ? 30 : 15;
+  if (state.health <= costH) {
+    playTone('gentle');
+    showToast('❤️ 體力快見底啦！先去「財・金幣市集」吃個營養便當補充體力吧。', 'amber');
+    return;
+  }
+  state.workCount++;
+  playTone('coin');
+  const pay = type === 'heavy' ? 2200 : 1200;
+  applyEffects({ money: pay, health: -costH, mood: -4, ccsa: { "經濟能力": 8, "就業能力": 5 } });
+  if (state.workCount >= 2) unlockAchievement('hard_worker');
+  showToast(`☕ 打工完成！獲得薪資 +$${pay.toLocaleString()}，記得補充體力喔！`, 'emerald');
+  renderIslandPanel(GAME_DATA.islands.find(i => i.id === 'career'));
+}
+
+function buyShopItem(item) {
+  if (item === 'meal') {
+    if (state.money < 200) return showToast('💰 存款不足 $200，去打工或領航廣場看看吧！', 'amber');
+    playTone('coin');
+    applyEffects({ money: -200, health: 25, mood: 8, ccsa: { "自理生活": 8 } });
+    showToast('🍱 吃飽喝足！體力 +25、心情 +8', 'emerald');
+  } else if (item === 'accident') {
+    if (state.money < 600) return showToast('💰 存款不足 $600！', 'amber');
+    playTone('coin');
+    applyEffects({ money: -600, addItem: 'accident_insurance', ccsa: { "財務管理": 10, "自理生活": 10 } });
+  } else if (item === 'fund') {
+    if (state.money < 1500) return showToast('💰 存款不足 $1,500，先多賺點錢再來存！', 'amber');
+    playTone('lightup');
+    applyEffects({ money: -1500, addItem: 'emergency_fund', mood: 10, ccsa: { "財務管理": 25, "經濟能力": 15 } });
+    unlockAchievement('smart_saver');
+  } else if (item === 'bnpl') {
+    state.bnplDebt = true;
+    playTone('gentle');
+    applyEffects({ mood: 15, ccsa: { "財務管理": -5 } });
+    showToast('👟 雖然 0 元拿到球鞋很開心，但接下來完成任務時會自動扣分期款喔！', 'amber');
+  }
+  renderIslandPanel(GAME_DATA.islands.find(i => i.id === 'finance'));
+}
+
+function startBreathingExercise() {
+  playTone('click');
+  const btn = document.getElementById('btn-start-breath');
+  const visual = document.getElementById('breath-visual');
+  const circle = document.getElementById('breath-circle');
+  const text = document.getElementById('breath-text');
+  btn.disabled = true;
+  btn.textContent = '深呼吸進行中...';
+  visual.classList.remove('hidden');
+  circle.classList.add('breathe-active');
+
+  let sec = 0;
+  clearInterval(breathingTimer);
+  breathingTimer = setInterval(() => {
+    sec++;
+    if (sec <= 2) { circle.textContent = '吸氣'; text.textContent = '慢慢把空氣吸進肚子裡...'; }
+    else if (sec === 3) { circle.textContent = '停一下'; text.textContent = '感受肩膀慢慢放鬆...'; }
+    else if (sec <= 5) { circle.textContent = '吐氣'; text.textContent = '把壓力隨著呼吸吐出來...'; }
+    if (sec >= 5) {
+      clearInterval(breathingTimer);
+      circle.classList.remove('breathe-active');
+      playTone('correct');
+      applyEffects({ mood: 20, health: 5, ccsa: { "心理能量": 15 } });
+      unlockAchievement('zen_soul');
+      showToast('🌤️ 呼～感覺好多了！心情 +20，霧氣散開了！', 'emerald');
+      btn.disabled = false;
+      btn.textContent = '再做一次深呼吸';
+      text.textContent = '你做得很好！隨時累了都可以回來這裡。';
+    }
+  }, 1000);
+}
+
+function startMission(islandId, missionId) {
+  playTone('click');
+  const isl = GAME_DATA.islands.find(i => i.id === islandId);
+  const mission = isl.missions.find(m => m.id === missionId);
+  const count = Math.min(mission.drawCount || 2, mission.questions.length);
+
+  const unseen = shuffleArray(mission.questions.filter(q => !state.seenQuestions.includes(q.q)));
+  const seen = shuffleArray(mission.questions.filter(q => state.seenQuestions.includes(q.q)));
+  const drawn = [...unseen, ...seen].slice(0, count).map(qObj => ({
+    ...qObj,
+    options: shuffleArray(qObj.options)
+  }));
+
+  activeQuiz = { islandId, mission, questions: drawn, qIndex: 0, correctCount: 0 };
+  renderQuizQuestion();
+}
+
+function renderQuizQuestion() {
+  const { mission, questions, qIndex } = activeQuiz;
+  const qObj = questions[qIndex];
+  const body = document.getElementById('panel-body');
+
+  body.innerHTML = `
+    <div class="space-y-3">
+      <div class="flex items-center justify-between text-xs font-bold text-slate-400">
+        <span>🎲 ${mission.title}</span>
+        <span>隨機第 ${qIndex + 1} / ${questions.length} 題</span>
+      </div>
+      <div class="p-3.5 rounded-2xl bg-sky-50/90 border border-sky-100 text-sm font-bold text-slate-800 leading-relaxed">
+        ${qObj.q}
+      </div>
+      <div id="quiz-options" class="space-y-2"></div>
+      <div id="quiz-feedback-area" class="hidden space-y-2.5"></div>
+    </div>
+  `;
+
+  const optBox = document.getElementById('quiz-options');
+  qObj.options.forEach((opt, idx) => {
+    const b = document.createElement('button');
+    b.className = 'w-full text-left p-3.5 rounded-2xl border-2 border-slate-100 hover:border-sky-300 bg-white hover:bg-sky-50/50 text-sm font-medium text-slate-700 transition';
+    b.textContent = opt.text;
+    b.onclick = () => handleQuizAnswer(opt, idx, qObj.q);
+    optBox.appendChild(b);
+  });
+}
+
+function handleQuizAnswer(opt, chosenIdx, qText) {
+  if (!state.seenQuestions.includes(qText)) state.seenQuestions.push(qText);
+
+  const optBox = document.getElementById('quiz-options');
+  Array.from(optBox.children).forEach((btn, i) => {
+    btn.disabled = true;
+    if (i === chosenIdx) {
+      btn.className = opt.isCorrect
+        ? 'w-full text-left p-3.5 rounded-2xl border-2 border-emerald-400 bg-emerald-50 text-sm font-bold text-emerald-900'
+        : 'w-full text-left p-3.5 rounded-2xl border-2 border-amber-300 bg-amber-50 text-sm font-bold text-amber-900';
+    } else {
+      btn.classList.add('opacity-50');
+    }
+  });
+
+  let comboNote = '';
+  if (opt.isCorrect) {
+    playTone('correct');
+    activeQuiz.correctCount++;
+    state.combo++;
+    if (state.combo > state.maxCombo) state.maxCombo = state.combo;
+    if (state.combo >= 2) {
+      const bonus = 300;
+      state.money += bonus;
+      state.mood = Math.min(100, state.mood + 3);
+      comboNote = `<div class="mt-1.5 text-xs font-black text-orange-600">🔥 連對 x${state.combo} 加成！額外獲得獎金 +$${bonus}、心情 +3</div>`;
+    }
+    if (state.combo >= 4) unlockAchievement('combo_master');
+  } else {
+    playTone('gentle');
+    state.combo = 0;
+  }
+
+  applyEffects(opt.effects);
+
+  const fbArea = document.getElementById('quiz-feedback-area');
+  fbArea.classList.remove('hidden');
+  const isLast = activeQuiz.qIndex >= activeQuiz.questions.length - 1;
+  fbArea.innerHTML = `
+    <div class="p-3.5 rounded-2xl ${opt.isCorrect ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'} border text-xs sm:text-sm text-slate-700 leading-relaxed">
+      <div class="font-black mb-1">${opt.isCorrect ? '✨ 知識小卡（答對了！）' : '💡 知識小卡（沒關係，這樣更好！）'}</div>
+      ${opt.feedback}
+      ${comboNote}
+    </div>
+    <button onclick="${isLast ? 'completeActiveMission()' : 'nextQuizQuestion()'}" class="clay-btn w-full py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm">
+      ${isLast ? '完成挑戰並結算 ✨' : '下一題 →'}
+    </button>
+  `;
+}
+
+function nextQuizQuestion() {
+  playTone('click');
+  activeQuiz.qIndex++;
+  renderQuizQuestion();
+}
+
+function completeActiveMission() {
+  const { islandId, mission } = activeQuiz;
+  const isFirstClear = !state.completedMissions.includes(mission.id);
+
+  if (isFirstClear) {
+    state.completedMissions.push(mission.id);
+    state.missionsDoneCount++;
+  }
+
+  if (mission.rewardItem && !state.items.includes(mission.rewardItem)) {
+    applyEffects({ addItem: mission.rewardItem });
+    if (mission.rewardItem === 'social_worker_card') unlockAchievement('resource_seeker');
+  }
+
+  if (state.bnplDebt) {
+    state.money -= 500;
+    showToast('💳 BNPL 球鞋分期自動扣款 -$500，感受一下每期帳單壓力喔！', 'amber');
+  }
+
+  if (!state.litIslands.includes(islandId)) {
+    state.litIslands.push(islandId);
+    lightUpIsland3D(islandId);
+    playTone('lightup');
+    const isl = GAME_DATA.islands.find(i => i.id === islandId);
+    showToast(`🏝️ 恭喜點亮【${isl.name}】！`, 'emerald');
+    if (islandId === 'housing') unlockAchievement('housing_pro');
+  } else {
+    playTone('coin');
+    showToast('✨ 練習完成！你的自立經驗值又更扎實了！', 'sky');
+  }
+
+  updateHUD();
+  renderIslandPanel(GAME_DATA.islands.find(i => i.id === islandId));
+
+  if (state.litIslands.length >= GAME_DATA.islands.length && !state.endingShown) {
+    state.endingShown = true;
+    setTimeout(() => {
+      closeIslandPanel();
+      showEndingModal();
+    }, 650);
+    return;
+  }
+
+  if (isFirstClear && state.missionsDoneCount % 2 === 0) {
+    setTimeout(() => triggerRandomEvent(false), 500);
+  }
+}
+
+function lightUpIsland3D(islandId) {
+  const obj = islandObjects[islandId];
+  if (!obj) return;
+  obj.mistMesh.visible = false;
+  const check = document.getElementById(`label-check-${islandId}`);
+  if (check) check.classList.remove('hidden');
+  connectionArcs.forEach((arc) => {
+    if (arc.from === islandId || arc.to === islandId) arc.mesh.visible = true;
+  });
+}
+
+// ============================================================================
+// 8. 隨機危機事件系統
+// ============================================================================
+function triggerRandomEvent(manual = false) {
+  if (manual) playTone('click');
+  let available = GAME_DATA.randomEvents.filter(e => !state.triggeredEvents.includes(e.id));
+  if (available.length === 0) {
+    state.triggeredEvents = [];
+    available = [...GAME_DATA.randomEvents];
+  }
+  const ev = available[Math.floor(Math.random() * available.length)];
+  state.triggeredEvents.push(ev.id);
+
+  document.getElementById('event-counter').textContent = `已遭遇 ${state.triggeredEvents.length}/${GAME_DATA.randomEvents.length}`;
+  document.getElementById('event-title').textContent = ev.title;
+  document.getElementById('event-desc').textContent = ev.desc;
+
+  const hintEl = document.getElementById('event-hint');
+  if (ev.securityHint && state.security >= ev.securityHint.threshold) {
+    hintEl.textContent = ev.securityHint.text;
+    hintEl.classList.remove('hidden');
+  } else {
+    hintEl.classList.add('hidden');
+  }
+
+  const choicesBox = document.getElementById('event-choices');
+  choicesBox.innerHTML = '';
+  document.getElementById('event-result').classList.add('hidden');
+
+  shuffleArray(ev.choices).forEach((c) => {
+    const b = document.createElement('button');
+    b.className = 'w-full text-left p-3.5 rounded-2xl border-2 border-slate-100 hover:border-sky-400 bg-white hover:bg-sky-50/40 text-sm font-bold text-slate-700 transition';
+    b.textContent = c.text;
+    b.onclick = () => resolveRandomEvent(c);
+    choicesBox.appendChild(b);
+  });
+
+  openModal('event-modal');
+}
+
+function resolveRandomEvent(choice) {
+  const choicesBox = document.getElementById('event-choices');
+  Array.from(choicesBox.children).forEach(b => b.disabled = true);
+
+  let feedbackText = choice.feedback;
+  const effectsCopy = JSON.parse(JSON.stringify(choice.effects || {}));
+
+  if (choice.itemCheck && state.items.includes(choice.itemCheck.item)) {
+    feedbackText = choice.itemCheck.bonusFeedback;
+    if (choice.itemCheck.moneyOverride !== undefined) effectsCopy.money = choice.itemCheck.moneyOverride;
+    else effectsCopy.mood = 5;
+    playTone('correct');
+  } else if ((effectsCopy.money && effectsCopy.money < -800) || (effectsCopy.mood && effectsCopy.mood <= -15)) {
+    playTone('gentle');
+  } else {
+    playTone('correct');
+  }
+
+  if (choice.unlockBadge) unlockAchievement(choice.unlockBadge);
+  applyEffects(effectsCopy);
+  document.getElementById('event-feedback').textContent = feedbackText;
+  document.getElementById('event-result').classList.remove('hidden');
+}
+
+function closeEventModal() {
+  playTone('click');
+  closeModal('event-modal');
+}
+
+// ============================================================================
+// 9. 數值更新、通知、背包與結算雷達圖
+// ============================================================================
+function applyEffects(eff) {
+  if (!eff) return;
+  if (eff.money) state.money += eff.money;
+  if (eff.health) state.health = Math.max(10, Math.min(100, state.health + eff.health));
+  if (eff.mood) state.mood = Math.max(10, Math.min(100, state.mood + eff.mood));
+  if (eff.security) state.security = Math.max(0, Math.min(100, state.security + eff.security));
+
+  if (eff.addItem && !state.items.includes(eff.addItem)) {
+    state.items.push(eff.addItem);
+    const meta = GAME_DATA.itemsMeta[eff.addItem];
+    if (meta) showToast(`${meta.icon} 獲得道具【${meta.name}】！`, 'sky');
+  }
+
+  if (eff.ccsa) {
+    Object.entries(eff.ccsa).forEach(([k, v]) => {
+      if (state.ccsa[k] !== undefined) {
+        state.ccsa[k] = Math.max(15, Math.min(100, state.ccsa[k] + v));
+      }
+    });
+  }
+  updateHUD();
+}
+
+function updateHUD() {
+  document.getElementById('stat-money').textContent = `$${state.money.toLocaleString()}`;
+  document.getElementById('stat-health').textContent = state.health;
+  document.getElementById('stat-mood').textContent = state.mood;
+  document.getElementById('stat-security').textContent = state.security;
+  document.getElementById('stat-age-pill').textContent = `${state.age}歲`;
+  document.getElementById('stat-lit').textContent = `${state.litIslands.length}/${GAME_DATA.islands.length}`;
+  document.getElementById('bag-count').textContent = state.items.length;
+
+  const comboPill = document.getElementById('stat-combo-pill');
+  if (state.combo >= 2) {
+    comboPill.textContent = `🔥 連對 x${state.combo}`;
+    comboPill.classList.remove('hidden');
+  } else {
+    comboPill.classList.add('hidden');
+  }
+
+  const moodWarn = document.getElementById('mood-warning');
+  if (state.mood < 40) moodWarn.classList.remove('hidden');
+  else moodWarn.classList.add('hidden');
+}
+
+function showToast(msg, color = 'emerald') {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  const styles = {
+    emerald: 'bg-emerald-500 text-white',
+    amber: 'bg-amber-400 text-slate-900',
+    sky: 'bg-sky-500 text-white'
+  };
+  el.className = `${styles[color] || styles.emerald} px-4 py-2.5 rounded-2xl shadow-lg text-xs sm:text-sm font-bold text-center transition-all duration-300 opacity-0 translate-y-[-8px]`;
+  el.textContent = msg;
+  container.appendChild(el);
+  requestAnimationFrame(() => el.classList.remove('opacity-0', 'translate-y-[-8px]'));
+  setTimeout(() => {
+    el.classList.add('opacity-0');
+    setTimeout(() => el.remove(), 300);
+  }, 3200);
+}
+
+function openModal(id) {
+  const m = document.getElementById(id);
+  m.classList.remove('hidden');
+  m.classList.add('flex');
+}
+function closeModal(id) {
+  const m = document.getElementById(id);
+  m.classList.add('hidden');
+  m.classList.remove('flex');
+}
+
+function openBagModal() {
+  playTone('click');
+  document.getElementById('bag-age').textContent = `${state.age} 歲`;
+  document.getElementById('bag-lit').textContent = `${state.litIslands.length} / 6`;
+  document.getElementById('bag-combo').textContent = `x${state.maxCombo}`;
+
+  const box = document.getElementById('bag-items');
+  if (state.items.length === 0) {
+    box.innerHTML = `<div class="text-xs text-slate-400 bg-slate-50 p-3 rounded-xl text-center">目前還沒有道具，快去「啟・領航廣場」或「財・金幣市集」收集吧！</div>`;
+  } else {
+    box.innerHTML = state.items.map(k => {
+      const m = GAME_DATA.itemsMeta[k];
+      return `
+        <div class="flex items-start gap-2.5 p-3 rounded-2xl bg-emerald-50/70 border border-emerald-100">
+          <span class="text-2xl">${m.icon}</span>
+          <div>
+            <div class="text-sm font-black text-slate-800">${m.name}</div>
+            <div class="text-xs text-slate-500">${m.desc}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const badgeBox = document.getElementById('bag-badges');
+  if (state.achievements.length === 0) {
+    badgeBox.innerHTML = `<span class="text-xs text-slate-400">完成挑戰或連對答題即可解鎖徽章喔！</span>`;
+  } else {
+    badgeBox.innerHTML = state.achievements.map(k => {
+      const a = GAME_DATA.achievementsMeta[k];
+      return `<span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-black">${a.icon} ${a.name}</span>`;
+    }).join('');
+  }
+  openModal('bag-modal');
+}
+
+function openHelpModal() {
+  playTone('click');
+  openModal('help-modal');
+}
+
+function openProgressOrEnding() {
+  playTone('click');
+  if (state.litIslands.length >= GAME_DATA.islands.length) {
+    showEndingModal();
+  } else {
+    showToast(`目前點亮了 ${state.litIslands.length}/6 座小島，點亮全部就能解鎖自立便當與雷達圖喔！`, 'sky');
+  }
+}
+
+function showEndingModal() {
+  playTone('lightup');
+  let title = '自立冒險達人';
+  let comment = '你一步步點亮了六座小島，證明自己面對生活難題時既有勇氣又有方法！';
+  if (state.items.includes('social_worker_card') && state.ccsa['關係網絡'] >= 65) {
+    title = '懂得求助的模範生';
+    comment = '你深知「自立不是一個人孤軍奮戰」，懂得善用社工與社區資源，這是最強大的生存超能力！';
+  } else if (state.security >= 85) {
+    title = '滿等防詐雷達';
+    comment = '你在數位時代擁有超強警覺心，不管是假投資還是一頁式網購都騙不了你！';
+  } else if (state.money >= 5000 || state.items.includes('emergency_fund')) {
+    title = '穩健理財小富翁';
+    comment = '你很會管理收支與備用金，為未來的獨立生活打下了最踏實的經濟底氣！';
+  }
+
+  document.getElementById('ending-title').textContent = title;
+  document.getElementById('ending-comment').textContent = `${comment}（本局最高連對 x${state.maxCombo}）`;
+
+  const endBadges = document.getElementById('ending-badges');
+  endBadges.innerHTML = state.achievements.map(k => {
+    const a = GAME_DATA.achievementsMeta[k];
+    return `<span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-black">${a.icon} ${a.name}</span>`;
+  }).join('');
+
+  openModal('ending-modal');
+  drawCCSARadarChart();
+}
+
+function drawCCSARadarChart() {
+  const canvas = document.getElementById('radar-canvas');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const cx = w / 2, cy = h / 2 + 6;
+  const maxR = 95;
+  const labels = GAME_DATA.gameMeta.ccsaIndicators;
+  const n = labels.length;
+
+  for (let level = 1; level <= 4; level++) {
+    const r = (maxR / 4) * level;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+      const x = cx + Math.cos(angle) * r, y = cy + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  ctx.font = 'bold 11px "Noto Sans TC", sans-serif';
+  ctx.fillStyle = '#475569'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(angle) * maxR, cy + Math.sin(angle) * maxR);
+    ctx.strokeStyle = '#e2e8f0'; ctx.stroke();
+    ctx.fillText(labels[i], cx + Math.cos(angle) * (maxR + 24), cy + Math.sin(angle) * (maxR + 18));
+  }
+
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const val = (state.ccsa[labels[i]] || 25) / 100;
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    const x = cx + Math.cos(angle) * (maxR * val), y = cy + Math.sin(angle) * (maxR * val);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(16, 185, 129, 0.32)'; ctx.fill();
+  ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2.5; ctx.stroke();
+
+  for (let i = 0; i < n; i++) {
+    const val = (state.ccsa[labels[i]] || 25) / 100;
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(angle) * (maxR * val), cy + Math.sin(angle) * (maxR * val), 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#059669'; ctx.fill();
+  }
+}
+
+function restartGame() {
+  closeModal('ending-modal');
+  closeIslandPanel();
+  const prevSound = state.soundEnabled;
+  initGameState();
+  state.soundEnabled = prevSound;
+
+  Object.values(islandObjects).forEach((obj) => {
+    obj.mistMesh.visible = true;
+    const check = document.getElementById(`label-check-${obj.data.id}`);
+    if (check) check.classList.add('hidden');
+  });
+  connectionArcs.forEach(a => a.mesh.visible = false);
+
+  document.getElementById('hud').classList.add('hidden');
+  document.getElementById('bottom-controls').classList.add('hidden');
+  document.getElementById('ob-step-1').classList.remove('hidden');
+  document.getElementById('ob-step-2').classList.add('hidden');
+  document.getElementById('draw-age').textContent = '?? 歲';
+  document.getElementById('draw-money').textContent = '$ ????';
+  document.getElementById('draw-note').classList.add('hidden');
+  const btnSpin = document.getElementById('btn-spin');
+  btnSpin.classList.remove('hidden');
+  btnSpin.disabled = false;
+  btnSpin.textContent = '🎲 轉動命運轉盤';
+  document.getElementById('btn-to-step2').classList.add('hidden');
+  document.getElementById('onboarding-modal').classList.remove('hidden');
+  resetCameraOverview();
+}
+
+// ============================================================================
+// 10. 啟動應用程式
+// ============================================================================
+window.onload = function () {
+  initThreeScene();
+  animate();
+};
+</script>
+</body>
+</html>
